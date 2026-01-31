@@ -1,0 +1,46 @@
+{
+  "hub": {
+    "url": "http://192.168.1.100",
+    "username": "",
+    "password": "",
+    "captureRateMs": 1000,
+    "adaptiveRate": true
+  },
+  "confidence": 50,
+  "scaleMode": "balanced",
+  "objectness": 0.25,
+  "nms": 0.05,
+  "aoi": {
+    "x1": 0,
+    "y1": 0,
+    "x2": 1000,
+    "y2": 1000
+  },
+  "size": {
+    "x1": 0,
+    "y1": 0,
+    "x2": 20,
+    "y2": 20
+  },
+  "ignore": [],
+  "stabelizeTransition": 600,
+  "minEventDuration": 3000,
+  "prioritize": "accuracy",  
+  "cropping": {
+	  "active": false,
+	  "throttle": 500,
+	  "sdcard": false,
+	  "mqtt": false,
+	  "http": false,
+	  "http_url": "",
+	  "http_auth": "none",
+	  "http_username": "",
+	  "http_password": "",
+	  "http_token": "",
+	  "leftborder": 0,
+	  "rightborder": 0,	  
+	  "topborder": 0,	  
+	  "bottomborder": 0
+  }
+}
+

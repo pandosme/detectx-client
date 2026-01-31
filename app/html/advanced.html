@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<!-- DetectX - Modern UI with Top Navigation -->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration</title>
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/app.css">
+    <script src="js/jquery-3.7.1.min.js"></script>
+    <script src="js/bootstrap.bundle.min.js"></script>
+
+<style>
+    :root {
+        --primary-color: #2563eb;
+        --primary-dark: #1e40af;
+        --primary-light: #3b82f6;
+        --success-color: #10b981;
+        --danger-color: #ef4444;
+        --warning-color: #f59e0b;
+        --info-color: #06b6d4;
+        --bg-light: #f8fafc;
+        --bg-white: #ffffff;
+        --text-dark: #1e293b;
+        --text-muted: #64748b;
+        --border-color: #e2e8f0;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: var(--bg-light);
+        color: var(--text-dark);
+    }
+
+    .top-navbar {
+        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+        box-shadow: var(--shadow-lg);
+        padding: 0;
+        min-height: 64px;
+    }
+
+    .navbar-brand {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: white !important;
+        padding: 0.75rem 1.5rem;
+    }
+
+    .nav-pills .nav-link {
+        color: rgba(255, 255, 255, 0.85);
+        border-radius: 8px;
+        padding: 0.65rem 1.25rem;
+        margin: 0 0.25rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+    }
+
+    .nav-pills .nav-link:hover {
+        background-color: rgba(255, 255, 255, 0.15);
+        color: white;
+    }
+
+    .nav-pills .nav-link.active {
+        background-color: rgba(255, 255, 255, 0.25);
+        color: white;
+        font-weight: 600;
+    }
+
+    .main-content {
+        padding: 2rem;
+        max-width: 1600px;
+        margin: 0 auto;
+    }
+
+    .card {
+        border: none;
+        border-radius: 12px;
+        box-shadow: var(--shadow-md);
+        background: var(--bg-white);
+        margin-bottom: 1.5rem;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-lg);
+    }
+
+    .card-header {
+        background: linear-gradient(135deg, var(--bg-light) 0%, var(--bg-white) 100%);
+        border-bottom: 2px solid var(--border-color);
+        padding: 1.25rem 1.5rem;
+        font-weight: 600;
+        font-size: 1.15rem;
+        color: var(--text-dark);
+        border-radius: 12px 12px 0 0 !important;
+    }
+
+    .form-label, .col-form-label {
+        color: var(--text-dark);
+        font-weight: 500;
+    }
+
+    .setting-label {
+        font-weight: 500;
+        min-width: 180px;
+    }
+
+    .form-select {
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        padding: 0.65rem 1rem;
+        transition: all 0.2s ease;
+    }
+
+    .form-select:focus {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .form-check {
+        padding-left: 1.5em;
+        margin-bottom: 0.5rem;
+    }
+
+    .form-check-input {
+        border-radius: 4px;
+        border: 2px solid var(--border-color);
+        width: 1.25em;
+        height: 1.25em;
+    }
+
+    .form-check-input:checked {
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+    }
+
+    .form-check-label {
+        word-break: break-word;
+        white-space: normal;
+        color: var(--text-dark);
+        margin-left: 0.5rem;
+    }
+
+    #labelsGrid {
+        margin-top: 1rem;
+    }
+
+    @media (max-width: 768px) {
+        .main-content {
+            padding: 1rem;
+        }
+
+        .navbar-brand {
+            font-size: 1.25rem;
+        }
+
+        .setting-label {
+            min-width: unset;
+        }
+    }
+</style>
+
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar navbar-expand-lg top-navbar">
+        <div class="container-fluid">
+            <span class="navbar-brand acapName">Custom Model</span>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                    aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation"
+                    style="background-color: rgba(255,255,255,0.2); border: none;">
+                <span class="navbar-toggler-icon" style="filter: invert(1);"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto nav-pills">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html">Detections</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="advanced.html">Configuration</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="cropping.html">Detection Export</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="mqtt.html">MQTT</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="about.html">About</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- DetectX Hub Configuration Card -->
+        <div class="card">
+            <div class="card-header">
+                DetectX Hub Configuration
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <!-- Left Column: Configuration -->
+                    <div class="col-md-6">
+                        <h6 class="mb-3">Connection Settings</h6>
+                        <form>
+                            <div class="mb-3">
+                                <label for="hub_url" class="form-label">Server address</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">http://</span>
+                                    <input type="text" class="form-control" id="hub_url" placeholder="192.168.1.100">
+                                </div>
+                                <small class="form-text text-muted">DetectX Hub server IP or hostname</small>
+                            </div>
+                            <div class="mb-3">
+                                <label for="hub_username" class="form-label">Username (Optional)</label>
+                                <input type="text" class="form-control" id="hub_username" placeholder="">
+                            </div>
+                            <div class="mb-3">
+                                <label for="hub_password" class="form-label">Password (Optional)</label>
+                                <input type="password" class="form-control" id="hub_password" placeholder="">
+                            </div>
+                            <div class="mb-3">
+                                <label for="hub_captureRate" class="form-label">Capture Rate (ms)</label>
+                                <input type="number" class="form-control" id="hub_captureRate" min="100" step="100" placeholder="1000">
+                                <small class="form-text text-muted">Time between captures (100-10000ms)</small>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="hub_adaptiveRate" checked>
+                                    <label class="form-check-label" for="hub_adaptiveRate">
+                                        Adaptive Rate (auto-adjust based on response time)
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="d-grid">
+                                <button type="button" class="btn btn-primary" id="hub_connect">Connect</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Right Column: Hub Status -->
+                    <div class="col-md-6">
+                        <h6 class="mb-3">Hub Status</h6>
+                        <div class="mb-3">
+                            <strong>Connection:</strong><br>
+                            <span id="hub_status" class="text-muted">Unknown</span>
+                        </div>
+                        <div class="mb-3">
+                            <strong>Model Dimensions:</strong><br>
+                            <span id="hub_model" class="text-muted">-</span>
+                        </div>
+                        <div class="mb-3">
+                            <strong>Number of Classes:</strong><br>
+                            <span id="hub_classes" class="text-muted">-</span>
+                        </div>
+                        <div class="mb-3">
+                            <strong>Avg Response Time:</strong><br>
+                            <span id="hub_response_time" class="text-muted">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Event State Settings Card -->
+        <div class="card">
+            <div class="card-header">
+                Event State Settings
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="row mb-3 align-items-center">
+                        <label for="prioritize" class="col-sm-4 col-form-label setting-label">Prioritize</label>
+                        <div class="col-sm-6">
+                            <select class="form-select w-100" id="prioritize">
+                                <option value="accuracy">Accuracy (suppress false triggers)</option>
+                                <option value="speed">Speed (Trigger instantly)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mb-1 align-items-center">
+                        <label for="minEventDuration" class="col-sm-4 col-form-label setting-label">Min Event State Duration</label>
+                        <div class="col-sm-6">
+                            <select class="form-select w-100" id="minEventDuration">
+                                <option value="2000">2 seconds</option>
+                                <option value="3000">3 seconds</option>
+                                <option value="5000">5 seconds</option>
+                                <option value="10000">10 seconds</option>
+                                <option value="15000">15 seconds</option>
+                                <option value="30000">30 seconds</option>
+                            </select>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Labels Processed Card -->
+        <div class="card">
+            <div class="card-header">
+                Labels Processed
+            </div>
+            <div class="card-body">
+                <div class="row g-2" id="labelsGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div class="modal fade" id="errorModal" tabindex="-1" aria-labelledby="errorModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="errorModalLabel">Error</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    The application is not running.
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+var App = 0;
+$(document).ready(function() {
+    $.ajax({
+        type: "GET",
+        url: 'app',
+        dataType: 'json',
+        cache: false,
+        success: function(data) {
+            App = data;
+            document.title = App.manifest.acapPackageConf.setup.friendlyName;
+            $(".acapName").html(App.manifest.acapPackageConf.setup.friendlyName);
+            $("#model_status").text("Status: " + App.status.model.status);
+            $("#prioritize").val(App.settings.prioritize || "accuracy");
+            $("#minEventDuration").val(App.settings.minEventDuration);
+
+            // Load Hub settings
+            if (App.settings.hub) {
+                // Strip http:// prefix for display
+                var url = App.settings.hub.url || "";
+                url = url.replace(/^https?:\/\//, "");
+                $("#hub_url").val(url);
+                $("#hub_username").val(App.settings.hub.username || "");
+                $("#hub_password").val(App.settings.hub.password || "");
+                $("#hub_captureRate").val(App.settings.hub.captureRateMs || 1000);
+                $("#hub_adaptiveRate").prop("checked", App.settings.hub.adaptiveRate !== false);
+            }
+
+            // Load Hub status and labels
+            if (App.model && App.model.hub) {
+                $("#hub_status").text("Connected").removeClass("text-muted").addClass("text-success");
+                $("#hub_model").text(App.model.hub.model_width + "x" + App.model.hub.model_height);
+                $("#hub_classes").text(App.model.hub.classes);
+
+                // Load labels from Hub
+                if (App.model.classes) {
+                    createLabelCheckboxes(App.model.classes, App.settings.ignore);
+                }
+            } else {
+                $("#hub_status").text("Not Connected").removeClass("text-muted").addClass("text-danger");
+                // Try to load labels from local model if available
+                if (App.model && App.model.labels) {
+                    createLabelCheckboxes(App.model.labels, App.settings.ignore);
+                }
+            }
+            if (App.status && App.status.model && App.status.model.averageTime) {
+                $("#hub_response_time").text(App.status.model.averageTime + " ms");
+            }
+        },
+        error: function(response) {
+            $('#errorModal').modal('show');
+        }
+    });
+    setInterval( function(){
+        $.ajax({type: "GET",url: 'status',dataType: 'json',cache: false,
+            success: function( data ) {
+                $("#model_status").text("Status: " + data.model.status);
+                if (data.model && data.model.averageTime) {
+                    $("#hub_response_time").text(data.model.averageTime + " ms");
+                }
+            },
+            error(){
+                $("#model_status").text("Status: No response");
+            }
+        });
+    },300);
+});
+function createLabelCheckboxes(labels, ignoreList) {
+    const grid = $('#labelsGrid');
+    grid.empty();
+    // Responsive: 1/1/2/3/4 columns at xs/sm/md/lg/xl
+    for (let i = 0; i < labels.length; i++) {
+        const label = labels[i];
+        const isChecked = !ignoreList.includes(label);
+        // Use Bootstrap columns that wrap: 1 per row xs, 2 sm, 3 md, 4 lg+
+        const col = $(`
+            <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input label-checkbox" id="label-${i}" data-label="${label}"${isChecked ? ' checked' : ''}>
+                    <label class="form-check-label" for="label-${i}">${label}</label>
+                </div>
+            </div>
+        `);
+        grid.append(col);
+    }
+    $('.label-checkbox').change(function() {
+        const label = $(this).data('label');
+        if (this.checked) {
+            App.settings.ignore = App.settings.ignore.filter(item => item !== label);
+        } else {
+            if (!App.settings.ignore.includes(label)) {
+                App.settings.ignore.push(label);
+            }
+        }
+        $.ajax({
+            type: "POST",
+            url: "settings",
+            contentType: 'application/json',
+            data: JSON.stringify({ "ignore": App.settings.ignore }),
+        });
+    });
+}
+$('#minEventDuration').change(function() {
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ "minEventDuration": parseInt($(this).val()) }),
+    });
+});
+$('#prioritize').change(function() {
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ "prioritize": $(this).val() }),
+    });
+});
+
+// Hub Connect button handler
+$('#hub_connect').click(function() {
+    if (!App.settings.hub) App.settings.hub = {};
+
+    // Add http:// prefix to URL
+    var url = $('#hub_url').val().trim();
+    if (url && !url.match(/^https?:\/\//)) {
+        url = "http://" + url;
+    }
+
+    App.settings.hub.url = url;
+    App.settings.hub.username = $('#hub_username').val();
+    App.settings.hub.password = $('#hub_password').val();
+    App.settings.hub.captureRateMs = parseInt($('#hub_captureRate').val()) || 1000;
+    App.settings.hub.adaptiveRate = $('#hub_adaptiveRate').is(':checked');
+
+    // Update status
+    $("#hub_status").text("Connecting...").removeClass("text-danger text-success text-muted").addClass("text-warning");
+
+    // Save settings - ConfigUpdate callback will automatically trigger reconnection
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ hub: App.settings.hub }),
+        success: function() {
+            // Give the backend a moment to reconnect via ConfigUpdate callback
+            setTimeout(function() {
+                // Reload the page to get updated model info
+                location.reload();
+            }, 1500);
+        },
+        error: function() {
+            $("#hub_status").text("Failed to save settings").removeClass("text-warning text-success text-muted").addClass("text-danger");
+        }
+    });
+});
+
+// Hub URL change handler (for manual saves)
+$('#hub_url').change(function() {
+    if (!App.settings.hub) App.settings.hub = {};
+    var url = $(this).val().trim();
+    if (url && !url.match(/^https?:\/\//)) {
+        url = "http://" + url;
+    }
+    App.settings.hub.url = url;
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ hub: App.settings.hub })
+    });
+});
+
+$('#hub_username').change(function() {
+    if (!App.settings.hub) App.settings.hub = {};
+    App.settings.hub.username = $(this).val();
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ hub: App.settings.hub })
+    });
+});
+
+$('#hub_password').change(function() {
+    if (!App.settings.hub) App.settings.hub = {};
+    App.settings.hub.password = $(this).val();
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ hub: App.settings.hub })
+    });
+});
+
+$('#hub_captureRate').change(function() {
+    if (!App.settings.hub) App.settings.hub = {};
+    App.settings.hub.captureRateMs = parseInt($(this).val());
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ hub: App.settings.hub })
+    });
+});
+
+$('#hub_adaptiveRate').change(function() {
+    if (!App.settings.hub) App.settings.hub = {};
+    App.settings.hub.adaptiveRate = $(this).is(":checked");
+    $.ajax({
+        type: "POST",
+        url: "settings",
+        contentType: 'application/json',
+        data: JSON.stringify({ hub: App.settings.hub })
+    });
+});
+</script>
+</body>
+</html>
