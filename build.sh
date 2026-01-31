@@ -3,22 +3,20 @@
 # DetectX Client Build Script
 #
 # Usage:
-#   ./build.sh                    # Build for aarch64 with cache
-#   ./build.sh --clean            # Build for aarch64 without cache
-#   ./build.sh --arch armv7hf     # Build for armv7hf
-#   ./build.sh --arch aarch64     # Build for aarch64
-#   ./build.sh --all              # Build for both architectures
+#   ./build.sh                    # Build for both architectures (aarch64 and armv7hf) with cache
+#   ./build.sh --clean            # Build for both architectures without cache
+#   ./build.sh --arch armv7hf     # Build only for armv7hf
+#   ./build.sh --arch aarch64     # Build only for aarch64
 #
 # Options:
 #   --clean         Force rebuild without cache
-#   --arch <arch>   Build for specific architecture (aarch64 or armv7hf)
-#   --all           Build for all supported architectures
+#   --arch <arch>   Build for specific architecture only (aarch64 or armv7hf)
 
 set -e  # Exit on error
 
 CACHE_FLAG=""
-CHIP="aarch64"  # Default
-BUILD_ALL=false
+CHIP=""  # Empty means build all
+BUILD_ALL=true  # Default to building all architectures
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -30,15 +28,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --arch)
             CHIP="$2"
+            BUILD_ALL=false  # Override default when specific arch requested
             shift 2
-            ;;
-        --all)
-            BUILD_ALL=true
-            shift
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--clean] [--arch aarch64|armv7hf] [--all]"
+            echo "Usage: $0 [--clean] [--arch aarch64|armv7hf]"
             exit 1
             ;;
     esac
@@ -75,7 +70,13 @@ build_for_arch() {
 
 # Build based on options
 if [ "$BUILD_ALL" = true ]; then
-    echo "Building for all supported architectures..."
+    echo ""
+    echo "==========================================="
+    echo "Building for all supported architectures"
+    echo "  - aarch64 (ARTPEC-8/9)"
+    echo "  - armv7hf (ARTPEC-7)"
+    echo "==========================================="
+    echo ""
     build_for_arch "aarch64"
     build_for_arch "armv7hf"
     echo ""
@@ -91,5 +92,6 @@ else
         exit 1
     fi
 
+    echo "Building for $CHIP only..."
     build_for_arch "$CHIP"
 fi
