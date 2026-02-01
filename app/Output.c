@@ -242,7 +242,7 @@ void Output(cJSON* detections) {
                 continue;
             }
 
-            // Extract detection bbox (normalized 0-1, center format)
+            // Extract detection bbox (already in pixel coordinates, center format)
             cJSON* xObj = cJSON_GetObjectItem(detection, "x");
             cJSON* yObj = cJSON_GetObjectItem(detection, "y");
             cJSON* wObj = cJSON_GetObjectItem(detection, "w");
@@ -256,16 +256,12 @@ void Output(cJSON* detections) {
                 continue;
             }
 
-            // Convert normalized coordinates to pixel coordinates
-            double norm_x = xObj->valuedouble;
-            double norm_y = yObj->valuedouble;
-            double norm_w = wObj->valuedouble;
-            double norm_h = hObj->valuedouble;
-
-            int pixel_center_x = (int)(norm_x * img_w);
-            int pixel_center_y = (int)(norm_y * img_h);
-            int pixel_w = (int)(norm_w * img_w);
-            int pixel_h = (int)(norm_h * img_h);
+            // NOTE: main.c already converted normalized coords to pixels!
+            // The x, y, w, h values are ALREADY in pixel coordinates (not 0-1)
+            int pixel_center_x = (int)(xObj->valuedouble);
+            int pixel_center_y = (int)(yObj->valuedouble);
+            int pixel_w = (int)(wObj->valuedouble);
+            int pixel_h = (int)(hObj->valuedouble);
 
             // Convert from center format to top-left format
             int bbox_left = pixel_center_x - pixel_w / 2;
@@ -308,9 +304,16 @@ void Output(cJSON* detections) {
 
             unsigned jpeg_size = (unsigned)cropped_jpeg_size;
 
+            // Calculate detection bbox coordinates relative to the cropped image
+            // (for overlay rendering on the crop)
+            int det_x_in_crop = bbox_left - crop_x;
+            int det_y_in_crop = bbox_top - crop_y;
+            int det_w_in_crop = pixel_w;
+            int det_h_in_crop = pixel_h;
+
             // NOTE: Implement cache eviction in output_crop_cache_add for safety
             const char* imageDataBase64 = output_crop_cache_add(
-                jpeg_data, jpeg_size, label, conf, crop_x, crop_y, crop_w, crop_h);
+                jpeg_data, jpeg_size, label, conf, det_x_in_crop, det_y_in_crop, det_w_in_crop, det_h_in_crop);
 
             double now_ts = ACAP_DEVICE_Timestamp();
             if (imageDataBase64 && now_ts - last_output_time_ms > throttle) {
@@ -329,7 +332,7 @@ void Output(cJSON* detections) {
                             SD_FOLDER, safe_label, timestamp, idx);
 
                     if (save_jpeg_to_file(fname_img, jpeg_data, jpeg_size)) {
-                        if (save_label_to_file(fname_label, label, crop_x, crop_y, crop_w, crop_h)) {
+                        if (save_label_to_file(fname_label, label, det_x_in_crop, det_y_in_crop, det_w_in_crop, det_h_in_crop)) {
                             LOG_TRACE("Saved crop to SD: %s, %s\n", fname_img, fname_label);
                         } else {
                             LOG_WARN("%s: Failed to save crop label to SD: %s\n", __func__, fname_label);
@@ -345,10 +348,10 @@ void Output(cJSON* detections) {
                     cJSON_AddStringToObject(payload, "label", label);
                     cJSON_AddNumberToObject(payload, "timestamp", timestamp);
                     cJSON_AddNumberToObject(payload, "confidence", conf);
-                    cJSON_AddNumberToObject(payload, "x", crop_x);
-                    cJSON_AddNumberToObject(payload, "y", crop_y);
-                    cJSON_AddNumberToObject(payload, "w", crop_w);
-                    cJSON_AddNumberToObject(payload, "h", crop_h);
+                    cJSON_AddNumberToObject(payload, "x", det_x_in_crop);
+                    cJSON_AddNumberToObject(payload, "y", det_y_in_crop);
+                    cJSON_AddNumberToObject(payload, "w", det_w_in_crop);
+                    cJSON_AddNumberToObject(payload, "h", det_h_in_crop);
                     cJSON_AddStringToObject(payload, "image", imageDataBase64);
                     if (mqtt_export) {
                         char crop_topic[64];
