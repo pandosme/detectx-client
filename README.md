@@ -1,304 +1,301 @@
 # DetectX Client
 
-ACAP application for Axis cameras that performs remote object detection by streaming frames to a DetectX Server.
+**Bring AI-powered object detection to your entire Axis camera fleet** — without replacing hardware.
 
-## Overview
+DetectX Client enables any Axis camera (ARTPEC-7, ARTPEC-8, or ARTPEC-9) to perform object detection by sending video frames to a central [DetectX Server](https://github.com/pandosme/detectx-server) for inference. The server runs on a single ARTPEC-9 camera and can serve multiple client cameras simultaneously.
 
-DetectX Client is a lightweight ACAP (Axis Camera Application Platform) application that captures video frames from an Axis camera and sends them to a DetectX Server for inference. The server can detect objects using any TFLite INT8 model (ships with a COCO example model supporting 90 classes). Results are published via MQTT and displayed on the camera's web interface.
+## Why DetectX Client?
 
-## Relationship to DetectX
+### The Problem
+- You have a fleet of older Axis cameras (ARTPEC-7/8)
+- You want object detection but can't afford to replace all cameras with ARTPEC-9
+- Managing separate models on each camera is impractical
 
-This project is based on [DetectX](https://github.com/pandosme/DetectX), enabling object detection on older Axis cameras (ARTPEC-7, ARTPEC-8) by using remote inference.
+### The Solution
+Install DetectX Server on **one** ARTPEC-9 camera, install DetectX Client on **all other cameras**, and centralize your AI inference. Your entire camera fleet now has object detection capabilities.
 
-**How it Extends DetectX:**
-- **DetectX** (original): All-in-one solution for ARTPEC-9 cameras
-- **DetectX Client**: Lightweight client for ANY Axis camera (ARTPEC-7/8/9)
-  - Sends frames to [DetectX Server](https://github.com/pandosme/detectx-server) for inference
-  - Enables older cameras to perform object detection
-  - Can run on the same camera as the server OR on separate cameras
+## Use Cases
 
-**Use Case**: Upgrade your entire camera fleet to object detection without replacing hardware - just install the server on one ARTPEC-9 camera and clients on all other cameras.
+| Scenario | Setup |
+|----------|-------|
+| **Legacy Camera Upgrade** | 20 ARTPEC-7 cameras + 1 ARTPEC-9 server = 21 cameras with object detection |
+| **Cost Optimization** | Buy one high-end ARTPEC-9 camera instead of upgrading entire fleet |
+| **Centralized Model Management** | Update model once on server, all clients benefit immediately |
+| **Hybrid Deployment** | Server can also run DetectX Client locally for self-contained operation |
 
 ## Features
 
-- **Remote Inference**: Offloads compute to DetectX Server
-- **YUV → JPEG Pipeline**: Hardware-accelerated video capture with software JPEG encoding
-- **Multiple Scale Modes**: Crop, letterbox, and balanced preprocessing
-- **MQTT Integration**: Real-time detection publishing
-- **Web UI**: Live detection overlay and configuration
-- **Adaptive Capture**: Adjusts capture rate based on detection activity
-
-## Architecture
-
-```
-┌──────────────┐
-│ Axis Camera  │
-│   (ACAP)     │
-└──────┬───────┘
-       │
-       ├─► VDO Stream (NV12/YUV)
-       │   └─► RGB Conversion
-       │       └─► JPEG Encoding
-       │
-       ├─► HTTP POST ───────────┐
-       │                        │
-       │                        ▼
-       │                 ┌──────────────┐
-       │                 │   DetectX    │
-       │                 │    Server    │
-       │                 └──────┬───────┘
-       │                        │
-       ├─◄ Detections ──────────┘
-       │
-       ├─► MQTT Broker (results)
-       │
-       └─► Web UI (overlay)
-```
-
-## Supported Platforms
-
-| Architecture | Axis Chips | Camera Examples |
-|--------------|------------|-----------------|
-| **aarch64** | ARTPEC-8, ARTPEC-9 | P3255-LVE, Q1659, Q6155-E |
-| **armv7hf** | ARTPEC-7 | M3046-V, P1455-LE, Q6075-E |
-
-## Requirements
-
-- **Camera**: Axis camera with ACAP SDK 3.5+ support
-- **Server**: Running [DetectX Server](https://github.com/pandosme/detectx-server)
-- **MQTT Broker**: For publishing detection results (optional)
-- **Build Tools**: Docker and ACAP SDK
+- ✅ **Remote Inference**: Offload compute to DetectX Server via HTTP
+- ✅ **MQTT Integration**: Publish detection results in real-time
+- ✅ **Web UI**: Live detection overlay with configurable area-of-interest
+- ✅ **Event System**: Trigger ONVIF events based on detected objects
+- ✅ **Crop Export**: Save detected objects as JPEG crops (MQTT/HTTP/SD card)
+- ✅ **Adaptive Capture**: Automatically speeds up when detections are active
+- ✅ **Multi-Platform**: Works on ARTPEC-7, ARTPEC-8, and ARTPEC-9
 
 ## Quick Start
 
-### 1. Build the Application
+### 1. Prerequisites
 
-**For ARTPEC-8/9 (aarch64):**
-```bash
-./build.sh --clean
-# or specify architecture explicitly:
-docker build --build-arg CHIP=aarch64 -t detectx-client .
-```
+- **DetectX Server** installed on an ARTPEC-9 camera ([installation guide](https://github.com/pandosme/detectx-server))
+- **MQTT Broker** (optional, for publishing results)
+- **Docker** (for building the client application)
 
-**For ARTPEC-7 (armv7hf):**
-```bash
-docker build --build-arg CHIP=armv7hf -t detectx-client .
-```
-
-This produces: `DetectX_Client_1_0_0_<arch>.eap`
-
-### 2. Install on Camera
-
-**Via Web Interface:**
-1. Open camera web interface: `http://<camera-ip>`
-2. Go to **Settings → Apps**
-3. Click **Add** and upload the `.eap` file
-4. Click **Start**
-
-**Via Command Line:**
-```bash
-# Install
-scp DetectX_Client_1_0_0_aarch64.eap root@<camera-ip>:/tmp/
-ssh root@<camera-ip> "eap-install.sh install /tmp/DetectX_Client_1_0_0_aarch64.eap"
-
-# Start
-ssh root@<camera-ip> "systemctl start detectx_client.service"
-```
-
-### 3. Configure
-
-Edit settings via the camera's web interface under **Apps → DetectX Client → Settings**:
-
-```json
-{
-  "hub": {
-    "url": "http://server-ip:8080",
-    "username": "",
-    "password": ""
-  },
-  "scaleMode": "crop",
-  "captureRate": 10000,
-  "adaptiveCaptureEnabled": true,
-  "mqtt": {
-    "enabled": true,
-    "broker": "mqtt://broker-ip:1883",
-    "topic": "axis/detections"
-  }
-}
-```
-
-## Configuration Options
-
-### Hub Settings
-- `url`: DetectX Server endpoint (e.g., `http://192.168.1.100:8080`)
-- `username`: Optional HTTP digest auth username
-- `password`: Optional HTTP digest auth password
-
-### Detection Settings
-- `scaleMode`: Preprocessing mode
-  - `crop`: Center crop to model aspect ratio (1:1)
-  - `balanced`: 4:3 crop then stretch to 1:1
-  - `letterbox`: Preserve aspect with padding (not recommended)
-- `captureRate`: Milliseconds between captures (default: 10000 = 10s)
-- `adaptiveCaptureEnabled`: Speed up when detections found
-
-### MQTT Settings
-- `enabled`: Enable MQTT publishing
-- `broker`: MQTT broker URL
-- `topic`: Topic for detection messages
-
-## How It Works
-
-### YUV → JPEG Pipeline
-
-The application uses a unique approach to handle VDO buffer limitations:
-
-1. **Capture in NV12/YUV**: VDO provides frames in YUV format
-   - YUV buffers are in accessible memory ✓
-   - JPEG buffers are in hardware DMA memory (not accessible) ✗
-
-2. **Convert NV12 → RGB**: Software conversion (~30ms)
-   ```c
-   uint8_t* rgb = nv12_to_rgb(yuv_buffer, width, height);
-   ```
-
-3. **Encode RGB → JPEG**: libjpeg compression (~80ms)
-   ```c
-   uint8_t* jpeg = rgb_to_jpeg(rgb, width, height, quality);
-   ```
-
-4. **Send to Server**: HTTP POST (~235-430ms)
-   ```c
-   Hub_InferenceJPEG(hub, jpeg, jpeg_size, 0, scale_mode, &error);
-   ```
-
-**Total latency**: ~350-550ms per frame
-
-### Why Not JPEG Directly?
-
-VDO can output JPEG, but the buffer memory is hardware-encoded and not accessible from userspace:
-- `vdo_buffer_get_data()` returns a pointer to DMA memory
-- Any `memcpy()` or `write()` operations fail with `EFAULT` (Bad address)
-- Solution: Use accessible YUV format and encode ourselves
-
-## Development
-
-### Building from Source
+### 2. Build
 
 ```bash
 # Clone repository
 git clone https://github.com/pandosme/detectx-client
 cd detectx-client
 
-# Build for your target
-./build.sh --clean
+# Build for your camera architecture
+./build.sh --arch aarch64   # For ARTPEC-8/9
+# OR
+./build.sh --arch armv7hf   # For ARTPEC-7
 
-# Extract for debugging
-CONTAINER_ID=$(docker create detectx-client)
-docker cp $CONTAINER_ID:/opt/app ./build
-docker rm $CONTAINER_ID
+# Output: DetectX_Client_1_0_0_<arch>.eap
 ```
 
-### Viewing Logs
+### 3. Install
 
+**Via Camera Web Interface:**
+1. Navigate to `http://<camera-ip>` → **Settings** → **Apps**
+2. Click **Add** → Upload `DetectX_Client_1_0_0_<arch>.eap`
+3. Click **Start**
+
+**Via Command Line:**
 ```bash
-# SSH to camera
-ssh root@<camera-ip>
-
-# View application logs
-journalctl -u detectx_client.service -f
-
-# Or via syslog
-tail -f /var/log/syslog | grep detectx_client
+scp DetectX_Client_1_0_0_aarch64.eap root@<camera-ip>:/tmp/
+ssh root@<camera-ip> "eap-install.sh install /tmp/DetectX_Client_1_0_0_aarch64.eap"
+ssh root@<camera-ip> "systemctl start detectx_client.service"
 ```
 
-### File Structure
+### 4. Configure
+
+Open the camera web interface at `http://<camera-ip>` → **Apps** → **DetectX Client** → **Open**
+
+**Minimum Required Settings:**
+- **Hub URL**: `http://<server-camera-ip>:8080` (DetectX Server address)
+- **Confidence Threshold**: `30` (minimum detection confidence, 0-100)
+
+**Optional Settings:**
+- **MQTT Broker**: Enable to publish detection results
+- **Area of Interest**: Define detection region (drag to select)
+- **Ignore Labels**: Exclude specific object classes
+- **Cropping**: Export detected objects as image crops
+
+## Configuration Guide
+
+### Hub Connection
+
+```json
+{
+  "hub": {
+    "url": "http://192.168.1.100:8080",
+    "username": "",           // Optional: HTTP digest auth
+    "password": "",           // Optional: HTTP digest auth
+    "captureRateMs": 1000,    // Capture interval (ms)
+    "adaptiveRate": true      // Speed up when detections found
+  }
+}
+```
+
+### Detection Settings
+
+```json
+{
+  "confidence": 30,           // Minimum confidence (0-100)
+  "scaleMode": "balanced",    // Preprocessing: crop|balanced|letterbox
+  "aoi": {                    // Area of interest (0-1000 scale)
+    "x1": 0, "y1": 0,
+    "x2": 1000, "y2": 1000
+  },
+  "ignore": ["person"]        // Labels to ignore
+}
+```
+
+### MQTT Publishing
+
+```json
+{
+  "mqtt": {
+    "broker": "mqtt://192.168.1.50:1883",
+    "username": "",
+    "password": "",
+    "pretopic": "detectx"     // Topic prefix: {pretopic}/detection/{serial}
+  }
+}
+```
+
+### Cropping Output
+
+```json
+{
+  "cropping": {
+    "active": true,
+    "leftborder": 10,         // Padding around detection (pixels)
+    "rightborder": 10,
+    "topborder": 10,
+    "bottomborder": 10,
+    "mqtt": true,             // Publish crops via MQTT
+    "http": false,            // POST crops to HTTP endpoint
+    "sdcard": false,          // Save crops to SD card
+    "throttle": 500           // Minimum ms between crop exports
+  }
+}
+```
+
+## MQTT Topics
+
+Detection results are published to:
 
 ```
-client/
-├── app/
-│   ├── main.c           # Application entry point
-│   ├── Model.c          # Inference coordination
-│   │   ├── NV12 → RGB conversion
-│   │   ├── RGB → JPEG encoding
-│   │   └── Hub communication
-│   ├── Hub.c            # HTTP client for server
-│   ├── Video.c          # VDO frame capture
-│   ├── imgprovider.c    # VDO stream management
-│   ├── Output.c         # Web UI and overlays
-│   └── MQTT.c           # MQTT publishing
-├── settings/
-│   ├── settings.json    # Default configuration
-│   ├── events.json      # Event definitions
-│   └── mqtt.json        # MQTT settings
-├── build.sh             # Build script
-├── Dockerfile           # Multi-arch build
-└── manifest.json        # ACAP metadata
+{pretopic}/detection/{camera-serial}
 ```
+
+**Payload Example:**
+```json
+{
+  "label": "car",
+  "c": 87,                    // Confidence (0-100)
+  "x": 0.54,                  // Center X (normalized 0-1)
+  "y": 0.32,                  // Center Y (normalized 0-1)
+  "w": 0.15,                  // Width (normalized 0-1)
+  "h": 0.08,                  // Height (normalized 0-1)
+  "timestamp": 1738449823456
+}
+```
+
+Event state changes:
+```
+{pretopic}/event/{camera-serial}/{label}/true   # Object appeared
+{pretopic}/event/{camera-serial}/{label}/false  # Object disappeared
+```
+
+Cropped images (when enabled):
+```
+{pretopic}/crop/{camera-serial}
+```
+
+## Web Interface
+
+Access the web UI at `http://<camera-ip>` → **Apps** → **DetectX Client** → **Open**
+
+**Pages:**
+- **Home**: Live detection overlay with bounding boxes
+- **MQTT**: Configure MQTT broker connection
+- **Advanced**: Event stabilization and label management
+- **Cropping**: Configure detection crop export
+- **Crops**: View recent detection crops
+- **About**: System status and server connection info
+
+## Supported Cameras
+
+| Architecture | Axis Chips | Example Models |
+|--------------|------------|----------------|
+| **aarch64** | ARTPEC-8, ARTPEC-9 | P3255-LVE, Q1659, Q6155-E |
+| **armv7hf** | ARTPEC-7 | M3046-V, P1455-LE, Q6075-E |
 
 ## Troubleshooting
 
-### Application Won't Start
+### Connection Issues
 
+**Problem**: Client can't connect to server
 ```bash
-# Check logs
-ssh root@<camera-ip> "journalctl -u detectx_client.service -n 50"
-
-# Common issues:
-# - Server URL unreachable → Check network/firewall
-# - Invalid settings.json → Restore defaults via web UI
+# Test server connectivity from camera
+ssh root@<camera-ip>
+curl http://<server-ip>:8080/local/detectx/capabilities
+curl http://<server-ip>:8080/local/detectx/health
 ```
 
-### No Detections Received
+**Solution**: Check network connectivity, firewall rules, and server URL in settings
+
+### No Detections
+
+**Problem**: Client connects but no detections appear
+
+1. Check confidence threshold (try lowering to 20)
+2. Verify area-of-interest covers the scene
+3. Check server logs for errors:
+   ```bash
+   ssh root@<server-ip> "journalctl -u detectx_server.service -f"
+   ```
+
+### Performance Issues
+
+**Problem**: High CPU usage or slow response
+
+- Reduce capture rate: increase `captureRateMs` (default: 1000)
+- Check server queue status: `curl http://<server-ip>:8080/local/detectx/health`
+- Reduce number of concurrent clients per server
+
+### View Logs
 
 ```bash
-# Check server connectivity
-curl http://server-ip:8080/local/detectx/health
+# Client logs
+ssh root@<camera-ip> "journalctl -u detectx_client.service -f"
 
-# Check logs for Hub errors
-ssh root@<camera-ip> "journalctl -u detectx_client.service | grep 'Hub:'"
-
-# Verify scale mode matches server expectations
+# Server logs
+ssh root@<server-ip> "journalctl -u detectx_server.service -f"
 ```
 
-### High CPU Usage
+## How It Works
 
-- NV12 → RGB conversion is CPU-intensive
-- Normal: 10-20% CPU per capture
-- Reduce `captureRate` or resolution if needed
+```
+┌─────────────────┐
+│  Client Camera  │
+│  (ARTPEC-7/8/9) │
+└────────┬────────┘
+         │
+         │ 1. Capture frame (NV12/YUV)
+         │ 2. Convert to JPEG
+         │
+         ├─── HTTP POST ─────────────┐
+         │    (JPEG image)            │
+         │                            ▼
+         │                     ┌──────────────┐
+         │                     │   DetectX    │
+         │                     │    Server    │
+         │                     │  (ARTPEC-9)  │
+         │                     └──────┬───────┘
+         │                            │
+         │◄── JSON Response ──────────┘
+         │    (detections)
+         │
+         ├──► MQTT Broker
+         │    (results)
+         │
+         └──► Web UI
+              (overlay)
+```
 
-### Memory Issues
+**Detection Flow:**
+1. Client captures video frame every ~1 second
+2. Frame sent to DetectX Server via HTTP POST
+3. Server performs inference using DLPU acceleration
+4. Server returns detected objects (label, confidence, bounding box)
+5. Client publishes results via MQTT and displays on web UI
+6. Client triggers ONVIF events based on detected labels
 
-- Each frame uses ~2.7 MB RGB + ~200 KB JPEG
-- Frames are freed immediately after sending
-- Check for memory leaks: `top -p $(pidof detectx_client)`
+## Architecture & Development
 
-## Performance Metrics
+For detailed architecture, build process, and development information, see [CLAUDE.md](CLAUDE.md).
 
-| Operation | Time | CPU |
-|-----------|------|-----|
-| VDO Capture (NV12) | ~5ms | Low |
-| NV12 → RGB | ~30ms | High |
-| RGB → JPEG | ~80ms | Medium |
-| HTTP POST | ~235-430ms | Low |
-| **Total** | **~350-550ms** | **15-25%** |
+## Related Projects
 
-*Measured on ARTPEC-9 @ 960x960 resolution*
-
-## Known Limitations
-
-1. **YUV Only**: Must use YUV capture (JPEG buffers not accessible)
-2. **Software Encoding**: JPEG encoding is CPU-bound
-3. **Single Stream**: Only one inference stream at a time
-4. **No Local Inference**: Requires DetectX Server for processing
+- **DetectX Server**: [https://github.com/pandosme/detectx-server](https://github.com/pandosme/detectx-server) - Required inference server
+- **Original DetectX**: [https://github.com/pandosme/DetectX](https://github.com/pandosme/DetectX) - All-in-one solution for ARTPEC-9
 
 ## License
 
-[Your License Here]
+Apache License 2.0
 
-## Links
+## Author
 
-- **Original Project**: [DetectX](https://github.com/pandosme/DetectX) by Fredrik Persson
-- **Server**: [DetectX Server](https://github.com/pandosme/detectx-server)
-- **Issues**: [Report bugs](https://github.com/pandosme/detectx-client/issues)
-- **ACAP Documentation**: [Axis Developer Portal](https://www.axis.com/developer-community)
+Fredrik Persson ([pandosme](https://github.com/pandosme))
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/pandosme/detectx-client/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/pandosme/detectx-client/discussions)
+- **Documentation**: [Axis Developer Portal](https://www.axis.com/developer-community)

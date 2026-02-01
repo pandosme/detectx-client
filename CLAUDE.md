@@ -16,6 +16,258 @@ This is a native C application that integrates with:
 - libjpeg/libturbojpeg for JPEG encoding
 - FastCGI for web UI backend
 
+## System Architecture
+
+### High-Level Data Flow
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Client Camera (ACAP)                   │
+│                                                            │
+│  ┌────────────┐    ┌──────────┐    ┌──────────────┐     │
+│  │ VDO Stream │───►│ NV12→RGB │───►│  RGB→JPEG    │     │
+│  │  (YUV)     │    │  (~30ms) │    │   (~80ms)    │     │
+│  └────────────┘    └──────────┘    └──────┬───────┘     │
+│                                             │              │
+└─────────────────────────────────────────────┼──────────────┘
+                                              │
+                    HTTP POST (JPEG)          │
+                    (~235-430ms)              │
+                                              ▼
+                                    ┌──────────────────┐
+                                    │  DetectX Server  │
+                                    │   (ARTPEC-9)     │
+                                    │                  │
+                                    │  • DLPU Accel    │
+                                    │  • TFLite INT8   │
+                                    │  • 90 Classes    │
+                                    └────────┬─────────┘
+                                             │
+                    JSON Response            │
+                    (detections)             │
+                                             ▼
+┌──────────────────────────────────────────────────────────┐
+│                    Client Camera (ACAP)                   │
+│                                                            │
+│  ┌──────────┐    ┌────────────┐    ┌──────────────┐     │
+│  │ Filtering│───►│   Events   │───►│ MQTT Publish │     │
+│  │ (AOI)    │    │ (ONVIF)    │    │              │     │
+│  └──────────┘    └────────────┘    └──────────────┘     │
+│                                                            │
+│  ┌──────────┐    ┌────────────┐                          │
+│  │ Web UI   │    │  Cropping  │                          │
+│  │ Overlay  │    │  Export    │                          │
+│  └──────────┘    └────────────┘                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Total Latency**: ~350-550ms per frame (measured on ARTPEC-9 @ 960x960)
+
+### YUV → JPEG Pipeline
+
+The application uses a unique approach to handle VDO buffer memory accessibility limitations:
+
+**Why YUV Instead of JPEG?**
+
+VDO can output both JPEG and YUV formats, but JPEG buffers are in hardware DMA memory that is not accessible from userspace:
+- `vdo_buffer_get_data()` returns a pointer to DMA memory
+- Any `memcpy()`, `write()`, or direct memory access fails with `EFAULT` (Bad address)
+- JPEG buffers cannot be read by application code
+
+**Solution: YUV Capture with Software JPEG Encoding**
+
+1. **Capture in NV12/YUV** (Video.c)
+   - VDO provides frames in YUV format in accessible memory ✓
+   - Resolution determined by scale mode (crop/balanced/letterbox)
+   ```c
+   VdoBuffer* buffer = Video_Capture_YUV();
+   uint8_t* yuv_data = vdo_buffer_get_data(buffer); // Accessible!
+   ```
+
+2. **Convert NV12 → RGB** (imgprovider.c, ~30ms)
+   - Software conversion using color space transformation
+   - CPU-intensive but necessary for JPEG encoding
+   ```c
+   uint8_t* rgb = nv12_to_rgb(yuv_data, width, height);
+   ```
+
+3. **Encode RGB → JPEG** (imgutils.c, ~80ms)
+   - libjpeg compression at 90% quality
+   - Produces memory-accessible JPEG buffer
+   ```c
+   unsigned long jpeg_size;
+   uint8_t* jpeg = rgb_to_jpeg(rgb, width, height, 90, &jpeg_size);
+   ```
+
+4. **Send to Server** (Hub.c, ~235-430ms)
+   - HTTP POST with JPEG binary data
+   - Server handles decoding and preprocessing
+   ```c
+   cJSON* detections = Hub_InferenceJPEG(hub, jpeg, jpeg_size, 0, scale_mode, &error);
+   ```
+
+**Performance Impact:**
+- YUV capture: ~5ms (low CPU)
+- NV12→RGB: ~30ms (high CPU, 10-20% usage)
+- RGB→JPEG: ~80ms (medium CPU)
+- Network: ~235-430ms (low CPU)
+- **Total**: ~350-550ms per frame
+
+### File Structure
+
+```
+detectx-client/
+├── app/                          # Application source code
+│   ├── main.c                    # Entry point, main loop, configuration
+│   │   ├── Image capture scheduling
+│   │   ├── Detection filtering (AOI, confidence, size)
+│   │   └── Adaptive capture rate logic
+│   │
+│   ├── Model.c/h                 # Remote inference coordinator
+│   │   ├── Hub connection management
+│   │   ├── Video resolution calculation
+│   │   ├── NV12 → RGB → JPEG pipeline
+│   │   └── Detection coordinate transformation
+│   │
+│   ├── Hub.c/h                   # DetectX Server HTTP client
+│   │   ├── libcurl wrapper for inference API
+│   │   ├── HTTP digest authentication
+│   │   ├── Capabilities query
+│   │   └── Health monitoring
+│   │
+│   ├── Video.c/h                 # VDO frame capture abstraction
+│   │   ├── YUV stream initialization
+│   │   └── Single frame capture
+│   │
+│   ├── imgprovider.c/h           # VDO stream management
+│   │   ├── Stream setup and configuration
+│   │   └── Buffer handling
+│   │
+│   ├── imgutils.c/h              # Image processing utilities
+│   │   ├── JPEG encoding (libjpeg)
+│   │   ├── JPEG cropping (decode → crop RGB → re-encode)
+│   │   └── Buffer-to-file helpers
+│   │
+│   ├── preprocess.c/h            # Color space conversion
+│   │   └── NV12 → RGB conversion
+│   │
+│   ├── Output.c                  # Main output dispatcher
+│   │   ├── Event state management
+│   │   ├── MQTT publishing
+│   │   ├── Crop generation
+│   │   └── Coordinates all output modules
+│   │
+│   ├── Output_crop_cache.c/h    # Detection crop cache
+│   │   ├── In-memory LRU cache for recent crops
+│   │   ├── Base64 encoding for JSON export
+│   │   └── Web UI endpoint integration
+│   │
+│   ├── Output_helpers.c/h        # Event state helpers
+│   │   ├── Rolling window detection logic
+│   │   ├── Transition debouncing
+│   │   └── Minimum duration enforcement
+│   │
+│   ├── Output_http.c/h           # HTTP POST for crops
+│   │   └── Send detection crops to external endpoints
+│   │
+│   ├── MQTT.c/h                  # Paho MQTT 2.0 client
+│   │   ├── Connection management
+│   │   ├── Auto-reconnect
+│   │   ├── JSON and binary publishing
+│   │   └── TLS support
+│   │
+│   ├── ACAP.c/h                  # ACAP SDK wrapper
+│   │   ├── Configuration file management
+│   │   ├── FastCGI HTTP endpoints
+│   │   ├── Device information queries
+│   │   └── Status API
+│   │
+│   ├── CERTS.c/h                 # Certificate management
+│   │   └── MQTT TLS certificate handling
+│   │
+│   ├── html/                     # Web UI (FastCGI served)
+│   │   ├── index.html            # Live detection overlay
+│   │   ├── mqtt.html             # MQTT configuration
+│   │   ├── advanced.html         # Event settings
+│   │   ├── cropping.html         # Crop export config
+│   │   ├── crops.html            # Recent crops viewer
+│   │   └── about.html            # Status and diagnostics
+│   │
+│   ├── lib/                      # Architecture-specific libraries
+│   │   ├── aarch64/              # ARTPEC-8/9 libjpeg binaries
+│   │   │   ├── libjpeg.so.62
+│   │   │   └── libturbojpeg.so.0
+│   │   └── armv7hf/              # ARTPEC-7 libjpeg binaries (needed)
+│   │
+│   ├── settings/                 # Default configuration files
+│   │   ├── settings.json         # Hub, detection, event settings
+│   │   ├── mqtt.json             # MQTT broker configuration
+│   │   └── events.json           # Event state tracking (runtime)
+│   │
+│   ├── manifest.json             # ACAP package metadata
+│   │   ├── App name and version
+│   │   ├── FastCGI endpoints
+│   │   └── Required permissions (D-Bus)
+│   │
+│   └── Makefile                  # Build configuration
+│
+├── Dockerfile                    # Multi-stage Docker build
+│   ├── Stage 1: Build libjpeg-turbo for target arch
+│   └── Stage 2: Build ACAP application
+│
+├── build.sh                      # Build script wrapper
+│   ├── Supports --arch and --clean flags
+│   └── Manages Docker build process
+│
+├── README.md                     # User documentation (usage focus)
+└── CLAUDE.md                     # This file (architecture focus)
+```
+
+### Performance Metrics
+
+**Measured on ARTPEC-9 (Q1659) @ 960×960 resolution:**
+
+| Operation | Time (ms) | CPU Usage | Notes |
+|-----------|-----------|-----------|-------|
+| VDO Capture (NV12) | ~5 | Low | Hardware-accelerated |
+| NV12 → RGB Conversion | ~30 | High (10-20%) | Software, CPU-bound |
+| RGB → JPEG Encoding | ~80 | Medium | libjpeg compression |
+| HTTP POST to Server | 235-430 | Low | Network latency |
+| **Total per Frame** | **350-550** | **15-25%** | End-to-end |
+
+**Memory Usage:**
+- Per-frame RGB buffer: ~2.7 MB (960×960×3)
+- Per-frame JPEG: ~200 KB (quality 90)
+- Stored inference JPEG: ~200 KB (for UI/cropping)
+- Crop cache: 10 crops × ~50 KB = ~500 KB
+
+**Network Bandwidth:**
+- Typical: ~200 KB per inference request
+- At 1 fps: ~200 KB/s = 1.6 Mbps
+- At 10 fps: ~2 MB/s = 16 Mbps
+
+### Known Limitations
+
+1. **YUV Capture Only**: Cannot use VDO JPEG buffers due to DMA memory restrictions
+   - Must perform software RGB conversion and JPEG encoding
+   - Increases CPU usage and latency
+
+2. **Software JPEG Encoding**: No hardware JPEG encoder access from ACAP
+   - libjpeg encoding is CPU-intensive (~80ms)
+   - Limits maximum frame rate
+
+3. **Single Inference Stream**: Only one inference request at a time
+   - Serial processing: capture → convert → encode → send → wait → repeat
+   - Cannot pipeline multiple frames
+
+4. **Network Dependent**: Requires stable connection to DetectX Server
+   - Latency includes network round-trip (~235-430ms)
+   - No local fallback if server unavailable
+
+5. **No Local Caching**: Detections are not persisted locally
+   - Event state tracked in memory only
+   - Restart clears all state
+
 ## Building and Development
 
 ### Build Commands
