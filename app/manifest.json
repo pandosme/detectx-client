@@ -20,7 +20,8 @@
 				{"name": "model","access": "admin","type": "fastCgi"},
 				{"name": "mqtt","access": "admin","type": "fastCgi"},
 				{"name": "certs","access": "admin","type": "fastCgi"},
-				{"name": "crops","access": "admin","type": "fastCgi"}
+				{"name": "crops","access": "admin","type": "fastCgi"},
+				{"name": "snapshot","access": "admin","type": "fastCgi"}
 			]
 		}
     },

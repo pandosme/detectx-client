@@ -10,11 +10,15 @@
 #include "MQTT.h"
 #include "Model.h"
 #include "cJSON.h"
+#include "imgutils.h"
 
 #include "Output.h"
 #include "Output_crop_cache.h"
 #include "Output_helpers.h"
 #include "Output_http.h"
+
+// External function from main.c to get stored inference JPEG
+extern unsigned char* GetInferenceJPEG(size_t* out_size, int* out_width, int* out_height);
 
 #define LOG(fmt, args...)      { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args);}
 #define LOG_WARN(fmt, args...) { syslog(LOG_WARNING, fmt, ## args); printf(fmt, ## args);}
@@ -225,19 +229,84 @@ void Output(cJSON* detections) {
 
         // Cropping output path
         if (cropping_active) {
-            int crop_x = 0, crop_y = 0, crop_w = 0, crop_h = 0, img_w = 0, img_h = 0;
-            unsigned jpeg_size = 0;
-            // Note: Cropping not supported in Client mode (JPEG-only inference)
-            // TODO: Implement cropping via Hub API if needed
-            const unsigned char* jpeg_data = NULL;
-            // Model_GetImageData(detection, &jpeg_size,
-            //                    &crop_x, &crop_y, &crop_w, &crop_h,
-            //                    &img_w, &img_h);
+            // Get stored inference JPEG and dimensions
+            size_t full_jpeg_size = 0;
+            int img_w = 0, img_h = 0;
+            unsigned char* full_jpeg = GetInferenceJPEG(&full_jpeg_size, &img_w, &img_h);
 
-            crop_x = leftborder_offset;
-            crop_y = topborder_offset;
-            crop_w = img_w - leftborder_offset - rightborder_offset;
-            crop_h = img_h - topborder_offset - bottomborder_offset;
+            if (!full_jpeg || !full_jpeg_size || !img_w || !img_h) {
+                LOG_WARN("%s: No inference JPEG available for cropping\n", __func__);
+                if (full_jpeg) free(full_jpeg);
+                idx++;
+                detection = detection->next;
+                continue;
+            }
+
+            // Extract detection bbox (normalized 0-1, center format)
+            cJSON* xObj = cJSON_GetObjectItem(detection, "x");
+            cJSON* yObj = cJSON_GetObjectItem(detection, "y");
+            cJSON* wObj = cJSON_GetObjectItem(detection, "w");
+            cJSON* hObj = cJSON_GetObjectItem(detection, "h");
+
+            if (!xObj || !yObj || !wObj || !hObj) {
+                LOG_WARN("%s: Detection missing bbox coordinates\n", __func__);
+                free(full_jpeg);
+                idx++;
+                detection = detection->next;
+                continue;
+            }
+
+            // Convert normalized coordinates to pixel coordinates
+            double norm_x = xObj->valuedouble;
+            double norm_y = yObj->valuedouble;
+            double norm_w = wObj->valuedouble;
+            double norm_h = hObj->valuedouble;
+
+            int pixel_center_x = (int)(norm_x * img_w);
+            int pixel_center_y = (int)(norm_y * img_h);
+            int pixel_w = (int)(norm_w * img_w);
+            int pixel_h = (int)(norm_h * img_h);
+
+            // Convert from center format to top-left format
+            int bbox_left = pixel_center_x - pixel_w / 2;
+            int bbox_top = pixel_center_y - pixel_h / 2;
+
+            // Apply border offsets
+            int crop_x = bbox_left - leftborder_offset;
+            int crop_y = bbox_top - topborder_offset;
+            int crop_w = pixel_w + leftborder_offset + rightborder_offset;
+            int crop_h = pixel_h + topborder_offset + bottomborder_offset;
+
+            // Clamp to image bounds
+            if (crop_x < 0) { crop_w += crop_x; crop_x = 0; }
+            if (crop_y < 0) { crop_h += crop_y; crop_y = 0; }
+            if (crop_x + crop_w > img_w) crop_w = img_w - crop_x;
+            if (crop_y + crop_h > img_h) crop_h = img_h - crop_y;
+
+            if (crop_w <= 0 || crop_h <= 0) {
+                LOG_WARN("%s: Invalid crop dimensions after clamping: %dx%d\n", __func__, crop_w, crop_h);
+                free(full_jpeg);
+                idx++;
+                detection = detection->next;
+                continue;
+            }
+
+            // Crop the JPEG
+            unsigned long cropped_jpeg_size = 0;
+            unsigned char* jpeg_data = crop_jpeg(full_jpeg, full_jpeg_size,
+                                                  crop_x, crop_y, crop_w, crop_h,
+                                                  &cropped_jpeg_size);
+            free(full_jpeg);  // Don't need full JPEG anymore
+
+            if (!jpeg_data || !cropped_jpeg_size) {
+                LOG_WARN("%s: Failed to crop JPEG\n", __func__);
+                if (jpeg_data) free(jpeg_data);
+                idx++;
+                detection = detection->next;
+                continue;
+            }
+
+            unsigned jpeg_size = (unsigned)cropped_jpeg_size;
 
             // NOTE: Implement cache eviction in output_crop_cache_add for safety
             const char* imageDataBase64 = output_crop_cache_add(
@@ -313,6 +382,11 @@ void Output(cJSON* detections) {
                     }
                     cJSON_Delete(payload);
                 }
+            }
+
+            // Free the cropped JPEG buffer
+            if (jpeg_data) {
+                free((void*)jpeg_data);
             }
         }
         idx++;

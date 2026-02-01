@@ -81,6 +81,24 @@ unsigned char* crop_interleaved(unsigned char* image_buffer,
                                 int crop_h);
 
 /**
+ * @brief Crop a JPEG image: decode → crop RGB → re-encode
+ *
+ * @param jpeg_input Input JPEG data
+ * @param jpeg_input_size Size of input JPEG
+ * @param crop_x Left edge of crop region (pixels)
+ * @param crop_y Top edge of crop region (pixels)
+ * @param crop_w Width of crop region (pixels)
+ * @param crop_h Height of crop region (pixels)
+ * @param jpeg_output_size Output parameter for cropped JPEG size
+ * @return Pointer to cropped JPEG buffer (caller must free), or NULL on error
+ */
+unsigned char* crop_jpeg(const unsigned char* jpeg_input,
+                         unsigned long jpeg_input_size,
+                         int crop_x, int crop_y,
+                         int crop_w, int crop_h,
+                         unsigned long* jpeg_output_size);
+
+/**
  * @brief An example of how to use the supplied utility functions
  *
  */

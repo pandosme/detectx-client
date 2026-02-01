@@ -192,3 +192,102 @@ void test_buffer_to_jpeg_file(void)
     free(crop_buffer);
     free(jpeg_buffer);
 }
+
+/**
+ * @brief Crop a JPEG image: decode → crop RGB → re-encode
+ *
+ * @param jpeg_input Input JPEG data
+ * @param jpeg_input_size Size of input JPEG
+ * @param crop_x Left edge of crop region (pixels)
+ * @param crop_y Top edge of crop region (pixels)
+ * @param crop_w Width of crop region (pixels)
+ * @param crop_h Height of crop region (pixels)
+ * @param jpeg_output_size Output parameter for cropped JPEG size
+ * @return Pointer to cropped JPEG buffer (caller must free), or NULL on error
+ */
+unsigned char* crop_jpeg(const unsigned char* jpeg_input,
+                         unsigned long jpeg_input_size,
+                         int crop_x, int crop_y,
+                         int crop_w, int crop_h,
+                         unsigned long* jpeg_output_size)
+{
+    if (!jpeg_input || !jpeg_output_size || jpeg_input_size == 0) {
+        LOG_WARN("crop_jpeg: Invalid input parameters\n");
+        return NULL;
+    }
+
+    LOG_TRACE("<%s: input_size=%lu, crop=(%d,%d,%d,%d)\n", __func__,
+              jpeg_input_size, crop_x, crop_y, crop_w, crop_h);
+
+    // Step 1: Decode JPEG to RGB
+    struct jpeg_decompress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_decompress(&cinfo);
+
+    // Set up memory source
+    jpeg_mem_src(&cinfo, (unsigned char*)jpeg_input, jpeg_input_size);
+
+    // Read JPEG header
+    if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
+        LOG_WARN("crop_jpeg: Failed to read JPEG header\n");
+        jpeg_destroy_decompress(&cinfo);
+        return NULL;
+    }
+
+    // Start decompression
+    jpeg_start_decompress(&cinfo);
+
+    int width = cinfo.output_width;
+    int height = cinfo.output_height;
+    int channels = cinfo.output_components;
+
+    LOG_TRACE("crop_jpeg: Decoded image %dx%dx%d\n", width, height, channels);
+
+    // Allocate RGB buffer
+    unsigned char* rgb_buffer = (unsigned char*)malloc(width * height * channels);
+    if (!rgb_buffer) {
+        LOG_WARN("crop_jpeg: Failed to allocate RGB buffer\n");
+        jpeg_destroy_decompress(&cinfo);
+        return NULL;
+    }
+
+    // Read scanlines
+    int row_stride = width * channels;
+    JSAMPROW row_pointer[1];
+    int row = 0;
+    while (cinfo.output_scanline < cinfo.output_height) {
+        row_pointer[0] = &rgb_buffer[row * row_stride];
+        jpeg_read_scanlines(&cinfo, row_pointer, 1);
+        row++;
+    }
+
+    jpeg_finish_decompress(&cinfo);
+    jpeg_destroy_decompress(&cinfo);
+
+    LOG_TRACE("crop_jpeg: Decoded successfully\n");
+
+    // Step 2: Crop the RGB buffer
+    unsigned char* crop_buffer = crop_interleaved(rgb_buffer, width, height, channels,
+                                                   crop_x, crop_y, crop_w, crop_h);
+    free(rgb_buffer);
+
+    if (!crop_buffer) {
+        LOG_WARN("crop_jpeg: Crop failed\n");
+        return NULL;
+    }
+
+    LOG_TRACE("crop_jpeg: Cropped successfully\n");
+
+    // Step 3: Re-encode to JPEG
+    unsigned char* jpeg_output = NULL;
+    struct jpeg_compress_struct cinfo_out;
+    set_jpeg_configuration(crop_w, crop_h, channels, 90, &cinfo_out);
+    buffer_to_jpeg(crop_buffer, &cinfo_out, jpeg_output_size, &jpeg_output);
+
+    free(crop_buffer);
+
+    LOG_TRACE("%s>: Output size=%lu\n", __func__, *jpeg_output_size);
+    return jpeg_output;
+}

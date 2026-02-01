@@ -22,13 +22,17 @@
 
 #define LOG(fmt, args...)    { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args);}
 #define LOG_WARN(fmt, args...)    { syslog(LOG_WARNING, fmt, ## args); printf(fmt, ## args);}
-#define LOG_TRACE(fmt, args...)    { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args);}
+//#define LOG_TRACE(fmt, args...)    { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args);}
+#define LOG_TRACE(fmt, args...)    {}
+
+// External function from main.c to store inference JPEG for UI display
+extern void StoreInferenceJPEG(const unsigned char* jpeg_data, size_t jpeg_size, int width, int height);
 
 // Hub connection
 static HubContext* hub = NULL;
 static HubCapabilities caps = {0};
 
-// Video dimensions (from camera, not model)
+// Video dimensions (captured and sent to server)
 static unsigned int videoWidth = 1920;
 static unsigned int videoHeight = 1080;
 
@@ -123,7 +127,8 @@ cJSON* Model_Setup(void) {
 
     LOG("Video capture resolution: %ux%u (scale_mode=%s)\n", videoWidth, videoHeight, scale_mode);
 
-    // Calculate video aspect ratio
+    // Calculate video aspect ratio based on capture dimensions
+    // This aspect is used by main.c for coordinate transformation and by UI for display
     const char* videoAspect = "16:9";  // default
     double aspect = (double)videoWidth / (double)videoHeight;
     if (aspect >= 1.7) {
@@ -133,6 +138,7 @@ cJSON* Model_Setup(void) {
     } else if (aspect >= 0.9 && aspect <= 1.1) {
         videoAspect = "1:1";   // ~1.0
     }
+    LOG("Video aspect ratio: %s (%.2f)\n", videoAspect, aspect);
 
     // Create model info JSON for main.c
     cJSON* model = cJSON_CreateObject();
@@ -255,6 +261,7 @@ cJSON* Model_Inference(VdoBuffer* buffer) {
     // NV12 size = width × height × 1.5 (Y plane + UV plane)
     size_t nv12_size = (videoWidth * videoHeight * 3) / 2;
     LOG_TRACE("%s: Got NV12 buffer %p, size %zu\n", __func__, nv12_data, nv12_size);
+    (void)nv12_size;  // Suppress unused warning when LOG_TRACE is disabled
 
     // Convert NV12 to RGB
     uint8_t* rgb_data = nv12_to_rgb(nv12_data, videoWidth, videoHeight);
@@ -289,6 +296,9 @@ cJSON* Model_Inference(VdoBuffer* buffer) {
 
     LOG_TRACE("%s: Sending to Hub with scale_mode=%s, size=%lu\n", __func__, scale_mode, jpeg_size);
 
+    // Store JPEG for UI display (before sending to Hub)
+    StoreInferenceJPEG(jpeg_data, jpeg_size, videoWidth, videoHeight);
+
     // Send to Hub for inference
     char* error_msg = NULL;
     cJSON* detections = Hub_InferenceJPEG(hub, jpeg_data, jpeg_size, 0, scale_mode, &error_msg);
@@ -308,46 +318,43 @@ cJSON* Model_Inference(VdoBuffer* buffer) {
 
     LOG_TRACE("%s: Received response from Hub with %d detections\n", __func__, cJSON_GetArraySize(detections));
 
-    // Hub returns detections in original image coordinates (after letterboxing)
-    // We need to convert from Hub's coordinate system to our display coordinate system
-    // Hub uses bbox_pixels in original image size, we use normalized [0,1] coords
+    // Hub returns detections with bbox_yolo already in normalized [0,1] coordinates
+    // Just need to transform to the format expected by main.c (c, x, y, w, h, label)
+
+    LOG_TRACE("%s: Processing %d detections from Hub\n", __func__, cJSON_GetArraySize(detections));
 
     cJSON* normalized_detections = cJSON_CreateArray();
     cJSON* detection = NULL;
+    int det_index = 0;
     cJSON_ArrayForEach(detection, detections) {
-        cJSON* bbox_pixels = cJSON_GetObjectItem(detection, "bbox_pixels");
-        cJSON* image_info = cJSON_GetObjectItem(detection, "image");
+        det_index++;
 
-        if (!bbox_pixels || !image_info) continue;
+        // Log the full detection object for debugging
+        char* det_str = cJSON_PrintUnformatted(detection);
+        if (det_str) {
+            LOG("Detection #%d from server: %s\n", det_index, det_str);
+            free(det_str);
+        }
 
-        // Get original image dimensions from response
-        cJSON* img_width = cJSON_GetObjectItem(image_info, "width");
-        cJSON* img_height = cJSON_GetObjectItem(image_info, "height");
+        cJSON* bbox_yolo = cJSON_GetObjectItem(detection, "bbox_yolo");
 
-        if (!img_width || !img_height) continue;
+        if (!bbox_yolo) {
+            LOG_WARN("%s: Detection #%d missing bbox_yolo, skipping\n", __func__, det_index);
+            continue;
+        }
 
-        double orig_w = img_width->valuedouble;
-        double orig_h = img_height->valuedouble;
+        // Get YOLO bbox (normalized to captured image, in center format)
+        cJSON* x_item = cJSON_GetObjectItem(bbox_yolo, "x");
+        cJSON* y_item = cJSON_GetObjectItem(bbox_yolo, "y");
+        cJSON* w_item = cJSON_GetObjectItem(bbox_yolo, "w");
+        cJSON* h_item = cJSON_GetObjectItem(bbox_yolo, "h");
 
-        // Get bbox in pixels
-        cJSON* x_pix = cJSON_GetObjectItem(bbox_pixels, "x");
-        cJSON* y_pix = cJSON_GetObjectItem(bbox_pixels, "y");
-        cJSON* w_pix = cJSON_GetObjectItem(bbox_pixels, "w");
-        cJSON* h_pix = cJSON_GetObjectItem(bbox_pixels, "h");
+        if (!x_item || !y_item || !w_item || !h_item) {
+            LOG_WARN("%s: bbox_yolo missing coordinates, skipping\n", __func__);
+            continue;
+        }
 
-        if (!x_pix || !y_pix || !w_pix || !h_pix) continue;
-
-        // Convert to normalized coordinates [0,1]
-        double x_norm = x_pix->valuedouble / orig_w;
-        double y_norm = y_pix->valuedouble / orig_h;
-        double w_norm = w_pix->valuedouble / orig_w;
-        double h_norm = h_pix->valuedouble / orig_h;
-
-        // Convert to center coordinates (YOLO format)
-        double cx = x_norm + w_norm / 2.0;
-        double cy = y_norm + h_norm / 2.0;
-
-        // Create normalized detection
+        // Create normalized detection in expected format
         cJSON* norm_det = cJSON_CreateObject();
 
         // Copy label
@@ -356,25 +363,32 @@ cJSON* Model_Inference(VdoBuffer* buffer) {
             cJSON_AddStringToObject(norm_det, "label", label->valuestring);
         }
 
-        // Copy confidence (convert from 0-1 to 0-1, already normalized)
+        // Copy confidence
         cJSON* confidence = cJSON_GetObjectItem(detection, "confidence");
         if (confidence) {
             cJSON_AddNumberToObject(norm_det, "c", confidence->valuedouble);
         }
 
-        // Add normalized coordinates (center x, center y, width, height)
-        cJSON_AddNumberToObject(norm_det, "x", cx);
-        cJSON_AddNumberToObject(norm_det, "y", cy);
-        cJSON_AddNumberToObject(norm_det, "w", w_norm);
-        cJSON_AddNumberToObject(norm_det, "h", h_norm);
+        // Add normalized coordinates (pass through as-is, normalized to captured image)
+        cJSON_AddNumberToObject(norm_det, "x", x_item->valuedouble);
+        cJSON_AddNumberToObject(norm_det, "y", y_item->valuedouble);
+        cJSON_AddNumberToObject(norm_det, "w", w_item->valuedouble);
+        cJSON_AddNumberToObject(norm_det, "h", h_item->valuedouble);
+
+        // Log the transformed detection
+        char* norm_str = cJSON_PrintUnformatted(norm_det);
+        if (norm_str) {
+            LOG("Detection #%d transformed: %s\n", det_index, norm_str);
+            free(norm_str);
+        }
 
         cJSON_AddItemToArray(normalized_detections, norm_det);
     }
 
     cJSON_Delete(detections);
 
-    LOG_TRACE("%s: Received %d detections from Hub\n", __func__,
-              cJSON_GetArraySize(normalized_detections));
+    int final_count = cJSON_GetArraySize(normalized_detections);
+    LOG("Model_Inference: Returning %d normalized detections to main.c\n", final_count);
     LOG_TRACE("%s>\n", __func__);
 
     return normalized_detections;

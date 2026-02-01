@@ -230,11 +230,13 @@ const char* ACAP_Name(void) {
 int
 ACAP_Set_Config(const char* service, cJSON* serviceSettings ) {
 	LOG_TRACE("%s: %s\n",__func__,service);
-	if( cJSON_GetObjectItem(app,service) ) {
-		LOG_TRACE("%s: %s already registered\n",__func__,service);
-		return 1;
+	cJSON* existing = cJSON_GetObjectItem(app, service);
+	if (existing) {
+		LOG_TRACE("%s: %s already exists, replacing\n",__func__,service);
+		cJSON_ReplaceItemInObject(app, service, serviceSettings);
+	} else {
+		cJSON_AddItemToObject(app, service, serviceSettings);
 	}
-	cJSON_AddItemToObject( app, service, serviceSettings );
 	return 1;
 }
 

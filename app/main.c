@@ -23,7 +23,8 @@
 
 #define LOG(fmt, args...)    { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args);}
 #define LOG_WARN(fmt, args...)    { syslog(LOG_WARNING, fmt, ## args); printf(fmt, ## args);}
-#define LOG_TRACE(fmt, args...)    { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args); }
+//#define LOG_TRACE(fmt, args...)    { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args); }
+#define LOG_TRACE(fmt, args...)    {}
 
 #define APP_PACKAGE	"detectx_client"
 
@@ -37,7 +38,74 @@ GTimer *cleanupTransitionTimer = 0;
 static unsigned int capture_rate_ms = 1000;
 static unsigned int min_capture_rate_ms = 100;
 static gboolean adaptive_rate_enabled = TRUE;
+
+// Store last captured JPEG for UI display
+static unsigned char* last_jpeg_data = NULL;
+static size_t last_jpeg_size = 0;
+static int last_jpeg_width = 0;
+static int last_jpeg_height = 0;
+static GMutex jpeg_mutex;
 static guint capture_timer_id = 0;
+
+// Function to store the inference JPEG (called from Model.c)
+void StoreInferenceJPEG(const unsigned char* jpeg_data, size_t jpeg_size, int width, int height) {
+	if (!jpeg_data || jpeg_size == 0) {
+		return;
+	}
+
+	g_mutex_lock(&jpeg_mutex);
+
+	// Free old JPEG if exists
+	if (last_jpeg_data) {
+		free(last_jpeg_data);
+		last_jpeg_data = NULL;
+		last_jpeg_size = 0;
+	}
+
+	// Allocate and copy new JPEG
+	last_jpeg_data = (unsigned char*)malloc(jpeg_size);
+	if (last_jpeg_data) {
+		memcpy(last_jpeg_data, jpeg_data, jpeg_size);
+		last_jpeg_size = jpeg_size;
+		last_jpeg_width = width;
+		last_jpeg_height = height;
+		LOG_TRACE("Stored inference JPEG: %zu bytes (%dx%d)\n", jpeg_size, width, height);
+	} else {
+		LOG_WARN("Failed to allocate memory for inference JPEG\n");
+	}
+
+	g_mutex_unlock(&jpeg_mutex);
+}
+
+// Function to get a copy of the stored inference JPEG (called from Output.c)
+// Returns malloc'd buffer that caller must free, or NULL if no JPEG available
+unsigned char* GetInferenceJPEG(size_t* out_size, int* out_width, int* out_height) {
+	if (!out_size) return NULL;
+
+	g_mutex_lock(&jpeg_mutex);
+
+	if (!last_jpeg_data || last_jpeg_size == 0) {
+		g_mutex_unlock(&jpeg_mutex);
+		*out_size = 0;
+		if (out_width) *out_width = 0;
+		if (out_height) *out_height = 0;
+		return NULL;
+	}
+
+	// Allocate and copy JPEG data
+	unsigned char* jpeg_copy = (unsigned char*)malloc(last_jpeg_size);
+	if (jpeg_copy) {
+		memcpy(jpeg_copy, last_jpeg_data, last_jpeg_size);
+		*out_size = last_jpeg_size;
+		if (out_width) *out_width = last_jpeg_width;
+		if (out_height) *out_height = last_jpeg_height;
+	} else {
+		*out_size = 0;
+	}
+
+	g_mutex_unlock(&jpeg_mutex);
+	return jpeg_copy;
+}
 
 void
 ConfigUpdate( const char *setting, cJSON* data) {
@@ -58,9 +126,7 @@ ConfigUpdate( const char *setting, cJSON* data) {
 
 		if (new_model) {
 			// Update global model reference
-			if (model) {
-				cJSON_Delete(model);
-			}
+			// Don't delete old model - ACAP_Set_Config will handle it
 			model = new_model;
 			ACAP_Set_Config("model", model);
 
@@ -137,9 +203,7 @@ ACAP_ENDPOINT_model(const ACAP_HTTP_Response response, const ACAP_HTTP_Request r
 
 			if (new_model) {
 				// Update global model reference
-				if (model) {
-					cJSON_Delete(model);
-				}
+				// Don't delete old model - ACAP_Set_Config will handle it
 				model = new_model;
 				ACAP_Set_Config("model", model);
 
@@ -167,6 +231,45 @@ ACAP_ENDPOINT_model(const ACAP_HTTP_Response response, const ACAP_HTTP_Request r
 
 	// Handle unsupported methods
 	ACAP_HTTP_Respond_Error(response, 405, "Method Not Allowed - Use GET or POST");
+}
+
+// Snapshot endpoint handler - serves the last inference JPEG
+static void
+ACAP_ENDPOINT_snapshot(const ACAP_HTTP_Response response, const ACAP_HTTP_Request request) {
+	const char* method = ACAP_HTTP_Get_Method(request);
+
+	if (!method || strcmp(method, "GET") != 0) {
+		ACAP_HTTP_Respond_Error(response, 405, "Method Not Allowed - Use GET");
+		return;
+	}
+
+	g_mutex_lock(&jpeg_mutex);
+
+	if (!last_jpeg_data || last_jpeg_size == 0) {
+		g_mutex_unlock(&jpeg_mutex);
+		ACAP_HTTP_Respond_Error(response, 404, "No inference JPEG available");
+		return;
+	}
+
+	// Copy JPEG data while holding the lock
+	unsigned char* jpeg_copy = (unsigned char*)malloc(last_jpeg_size);
+	size_t jpeg_size = last_jpeg_size;
+
+	if (jpeg_copy) {
+		memcpy(jpeg_copy, last_jpeg_data, last_jpeg_size);
+	}
+
+	g_mutex_unlock(&jpeg_mutex);
+
+	if (!jpeg_copy) {
+		ACAP_HTTP_Respond_Error(response, 500, "Memory allocation failed");
+		return;
+	}
+
+	// Send JPEG response with headers and data
+	ACAP_HTTP_Header_FILE(response, "snapshot.jpg", "image/jpeg", jpeg_size);
+	ACAP_HTTP_Respond_Data(response, jpeg_size, jpeg_copy);
+	free(jpeg_copy);
 }
 
 
@@ -233,12 +336,11 @@ ImageProcess(gpointer data) {
 	//Apply Transform detection data and apply user filters
 	cJSON* processedDetections = cJSON_CreateArray();
 
-	// Get video aspect ratio for coordinate transformation
-	const char* videoAspect = "16:9"; // default
-	cJSON* aspectItem = cJSON_GetObjectItem(model, "videoAspect");
-	if (aspectItem && aspectItem->valuestring) {
-		videoAspect = aspectItem->valuestring;
-	}
+	// Get video dimensions for coordinate scaling
+	unsigned int videoWidth = cJSON_GetObjectItem(model, "videoWidth") ?
+	                          cJSON_GetObjectItem(model, "videoWidth")->valueint : 1000;
+	unsigned int videoHeight = cJSON_GetObjectItem(model, "videoHeight") ?
+	                           cJSON_GetObjectItem(model, "videoHeight")->valueint : 1000;
 
 	// AOI and Size are always in display space (16:9)
 	cJSON* aoi = cJSON_GetObjectItem(settings,"aoi");
@@ -281,23 +383,23 @@ ImageProcess(gpointer data) {
 				c = property->valueint;
 			}
 			if( strcmp("x",property->string) == 0 ) {
-				property->valueint = property->valuedouble * 1000;
+				property->valueint = property->valuedouble * videoWidth;
 				property->valuedouble = property->valueint;
 				cx += property->valueint;
 			}
 			if( strcmp("y",property->string) == 0 ) {
-				property->valueint = property->valuedouble * 1000;
+				property->valueint = property->valuedouble * videoHeight;
 				property->valuedouble = property->valueint;
 				cy += property->valueint;
 			}
 			if( strcmp("w",property->string) == 0 ) {
-				property->valueint = property->valuedouble * 1000;
+				property->valueint = property->valuedouble * videoWidth;
 				width = property->valueint;
 				property->valuedouble = property->valueint;
 				cx += property->valueint / 2;
 			}
 			if( strcmp("h",property->string) == 0 ) {
-				property->valueint = property->valuedouble * 1000;
+				property->valueint = property->valuedouble * videoHeight;
 				height = property->valueint;
 				property->valuedouble = property->valueint;
 				cy += property->valueint / 2;
@@ -309,27 +411,12 @@ ImageProcess(gpointer data) {
 		}
 		
 		//FILTER DETECTIONS
-		// Transform detection coordinates from capture space to display space (16:9)
-		// This matches the frontend transformCoordinates() function
+		// Coordinates are in capture space [0-1000] and match the displayed image
+		// No transformation needed since overlay displays the captured image
 		unsigned int display_cx = cx;
 		unsigned int display_cy = cy;
 		unsigned int display_width = width;
 		unsigned int display_height = height;
-
-		if (strcmp(videoAspect, "4:3") == 0) {
-			// Capture is 4:3 (800x600), displayed in 16:9
-			// Content is 750 units wide (scale 0.75), offset by 125
-			display_cx = (unsigned int)(cx * 0.75 + 125);
-			display_width = (unsigned int)(width * 0.75);
-			// Y coordinates unchanged
-		} else if (strcmp(videoAspect, "1:1") == 0) {
-			// Capture is 1:1 (640x640), displayed in 16:9
-			// Content is 562.5 units wide (scale 0.5625), offset by 218.75
-			display_cx = (unsigned int)(cx * 0.5625 + 218.75);
-			display_width = (unsigned int)(width * 0.5625);
-			// Y coordinates unchanged
-		}
-		// For 16:9, no transformation needed
 
 		int insert = 0;
 		if( c >= confidenceThreshold && display_cx >= x1 && display_cx <= x2 && display_cy >= y1 && display_cy <= y2 )
@@ -475,11 +562,17 @@ int main(void) {
 
 	openlog(APP_PACKAGE, LOG_PID|LOG_CONS, LOG_USER);
 
+	// Initialize JPEG storage mutex
+	g_mutex_init(&jpeg_mutex);
+
 	ACAP( APP_PACKAGE, ConfigUpdate );
 	LOG("------------ %s ----------\n",APP_PACKAGE);
 
 	// Register model endpoint for reconnect functionality
 	ACAP_HTTP_Node("model", ACAP_ENDPOINT_model);
+
+	// Register snapshot endpoint to serve inference JPEG
+	ACAP_HTTP_Node("snapshot", ACAP_ENDPOINT_snapshot);
 
 	settings = ACAP_Get_Config("settings");
 	if(!settings) {

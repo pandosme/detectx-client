@@ -152,12 +152,13 @@ Also links statically: `libjpeg`, `libturbojpeg` (in `app/lib/`)
 ### Data Flow
 
 1. **Setup**: `Model_Setup()` connects to Hub, queries capabilities (model size, classes)
-2. **Capture**: `Video_Capture_YUV()` gets NV12 frame from camera
+2. **Capture**: `Video_Capture_YUV()` gets NV12 frame from camera at calculated resolution (based on scale mode)
 3. **Conversion**: Software converts NV12 → RGB24 (~30ms)
 4. **Encoding**: Software encodes RGB → JPEG (~80ms)
 5. **Inference**: `Hub_InferenceJPEG()` sends JPEG to server via HTTP POST (~235-430ms)
-6. **Filtering**: main.c applies AOI, confidence, size filters to returned detections
-7. **Output**: `Output(processedDetections)` handles:
+6. **Response**: Server returns detections with bbox_yolo normalized to the sent image dimensions
+7. **Filtering**: main.c applies AOI, confidence, size filters to returned detections
+8. **Output**: `Output(processedDetections)` handles:
    - MQTT detection messages (bounding boxes)
    - Event state management (transition debouncing, per-label state)
    - MQTT event messages (label active/inactive)
@@ -190,7 +191,13 @@ Scale modes control how camera frames are preprocessed before sending to server:
 - **balanced**: Capture 4:3 aspect, server squeezes to 1:1
 - **letterbox**: Capture 16:9 aspect, server adds padding
 
-Implementation in `Model.c` lines 94-108 calculates capture resolution based on scale mode.
+Implementation in `Model.c` (lines ~100-115): Sets videoWidth/videoHeight based on scale mode.
+
+**Coordinate System:**
+- Server returns bbox_yolo normalized to the **captured image dimensions** (no transformation)
+- Web UI displays the **same captured image** at its native aspect ratio
+- Overlay coordinates match exactly - no transformation needed
+- This ensures "what you see is what was analyzed"
 
 ### Adding a New HTTP Endpoint
 
@@ -320,17 +327,21 @@ Content-Length: 123456
 
 **Response (Success):**
 ```json
-[
-  {
-    "index": 0,
-    "label": "person",
-    "class_id": 0,
-    "confidence": 0.87,
-    "bbox_pixels": {"x": 100, "y": 150, "w": 200, "h": 300},
-    "bbox_yolo": {"x": 0.5, "y": 0.4, "w": 0.3, "h": 0.5}
-  }
-]
+{
+  "detections": [
+    {
+      "index": -1,
+      "image": {"width": 848, "height": 640},
+      "label": "person",
+      "class_id": 0,
+      "confidence": 0.87,
+      "bbox_pixels": {"x": 100, "y": 150, "w": 200, "h": 300},
+      "bbox_yolo": {"x": 0.5, "y": 0.4, "w": 0.3, "h": 0.5}
+    }
+  ]
+}
 ```
+Note: Hub.c extracts the `detections` array from the wrapper object before returning to Model.c.
 
 **Response (No Detections):** 204 No Content
 **Response (Queue Full):** 503 Service Unavailable

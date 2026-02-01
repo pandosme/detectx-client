@@ -11,6 +11,12 @@
 #include <sys/time.h>
 #include <curl/curl.h>
 
+
+#define LOG(fmt, args...)    { LOG_TRACE(fmt, ## args); printf(fmt, ## args);}
+#define LOG_WARN(fmt, args...)    { syslog(LOG_WARNING, fmt, ## args); printf(fmt, ## args);}
+//#define LOG_TRACE(fmt, args...)    { LOG_TRACE(fmt, ## args); printf(fmt, ## args); }
+#define LOG_TRACE(fmt, args...)    {}
+
 #define HUB_TIMEOUT_SECS 30
 #define HUB_CONNECTTIMEOUT_SECS 10
 
@@ -36,7 +42,7 @@ static size_t write_callback(void* contents, size_t size, size_t nmemb, void* us
 
     char* ptr = realloc(mem->data, mem->size + realsize + 1);
     if (!ptr) {
-        syslog(LOG_ERR, "Hub: realloc failed in write_callback");
+        LOG_WARN("Hub: realloc failed in write_callback");
         return 0;
     }
 
@@ -50,13 +56,13 @@ static size_t write_callback(void* contents, size_t size, size_t nmemb, void* us
 
 HubContext* Hub_Init(const char* hub_url, const char* username, const char* password) {
     if (!hub_url) {
-        syslog(LOG_ERR, "Hub_Init: hub_url is NULL");
+        LOG_WARN("Hub_Init: hub_url is NULL");
         return NULL;
     }
 
     HubContext* ctx = calloc(1, sizeof(HubContext));
     if (!ctx) {
-        syslog(LOG_ERR, "Hub_Init: failed to allocate context");
+        LOG_WARN("Hub_Init: failed to allocate context");
         return NULL;
     }
 
@@ -70,7 +76,7 @@ HubContext* Hub_Init(const char* hub_url, const char* username, const char* pass
     curl_global_init(CURL_GLOBAL_DEFAULT);
     ctx->curl = curl_easy_init();
     if (!ctx->curl) {
-        syslog(LOG_ERR, "Hub_Init: curl_easy_init failed");
+        LOG_WARN("Hub_Init: curl_easy_init failed");
         free(ctx->hub_url);
         free(ctx->username);
         free(ctx->password);
@@ -78,7 +84,7 @@ HubContext* Hub_Init(const char* hub_url, const char* username, const char* pass
         return NULL;
     }
 
-    syslog(LOG_INFO, "Hub: initialized with URL %s", hub_url);
+    LOG_TRACE("Hub: initialized with URL %s", hub_url);
     return ctx;
 }
 
@@ -101,7 +107,7 @@ bool Hub_UpdateSettings(HubContext* ctx, const char* hub_url,
         ctx->password = strdup(password);
     }
 
-    syslog(LOG_INFO, "Hub: updated settings, URL=%s", ctx->hub_url);
+    LOG_TRACE("Hub: updated settings, URL=%s", ctx->hub_url);
     return true;
 }
 
@@ -135,7 +141,7 @@ static cJSON* hub_request_json(HubContext* ctx, const char* endpoint) {
                                 (end.tv_usec - start.tv_usec) / 1000.0;
 
     if (res != CURLE_OK) {
-        syslog(LOG_ERR, "Hub: request to %s failed: %s", url, curl_easy_strerror(res));
+        LOG_WARN("Hub: request to %s failed: %s", url, curl_easy_strerror(res));
         free(resp.data);
         ctx->available = false;
         return NULL;
@@ -144,7 +150,7 @@ static cJSON* hub_request_json(HubContext* ctx, const char* endpoint) {
     long http_code = 0;
     curl_easy_getinfo(ctx->curl, CURLINFO_RESPONSE_CODE, &http_code);
     if (http_code != 200) {
-        syslog(LOG_ERR, "Hub: request to %s returned HTTP %ld", url, http_code);
+        LOG_WARN("Hub: request to %s returned HTTP %ld", url, http_code);
         free(resp.data);
         ctx->available = false;
         return NULL;
@@ -154,7 +160,7 @@ static cJSON* hub_request_json(HubContext* ctx, const char* endpoint) {
     free(resp.data);
 
     if (!json) {
-        syslog(LOG_ERR, "Hub: failed to parse JSON response from %s", url);
+        LOG_WARN("Hub: failed to parse JSON response from %s", url);
         ctx->available = false;
         return NULL;
     }
@@ -173,7 +179,7 @@ bool Hub_GetCapabilities(HubContext* ctx, HubCapabilities* caps) {
 
     cJSON* model = cJSON_GetObjectItem(json, "model");
     if (!model) {
-        syslog(LOG_ERR, "Hub: capabilities missing 'model' object");
+        LOG_WARN("Hub: capabilities missing 'model' object");
         cJSON_Delete(json);
         return false;
     }
@@ -186,7 +192,7 @@ bool Hub_GetCapabilities(HubContext* ctx, HubCapabilities* caps) {
     cJSON* version = cJSON_GetObjectItem(json, "version");
 
     if (!width || !height || !channels || !classes) {
-        syslog(LOG_ERR, "Hub: capabilities missing required fields");
+        LOG_WARN("Hub: capabilities missing required fields");
         cJSON_Delete(json);
         return false;
     }
@@ -210,7 +216,7 @@ bool Hub_GetCapabilities(HubContext* ctx, HubCapabilities* caps) {
         }
     }
 
-    syslog(LOG_INFO, "Hub: capabilities - model %dx%dx%d, %d classes",
+    LOG_TRACE("Hub: capabilities - model %dx%dx%d, %d classes",
            caps->model_width, caps->model_height, caps->model_channels, caps->num_classes);
 
     cJSON_Delete(json);
@@ -305,7 +311,7 @@ cJSON* Hub_InferenceJPEG(HubContext* ctx, const uint8_t* jpeg_data,
                  ctx->hub_url, image_index);
     }
 
-    syslog(LOG_INFO, "Hub: Sending inference request to %s (size=%zu)", url, jpeg_size);
+    LOG_TRACE("Hub: Sending inference request to %s (size=%zu)", url, jpeg_size);
 
     // Use read callback instead of POSTFIELDS to handle special VDO memory
     ReadContext read_ctx = {
@@ -342,7 +348,7 @@ cJSON* Hub_InferenceJPEG(HubContext* ctx, const uint8_t* jpeg_data,
     ctx->last_request_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
                                 (end.tv_usec - start.tv_usec) / 1000.0;
 
-    syslog(LOG_INFO, "Hub: Request completed in %.2f ms (curl_result=%d)", ctx->last_request_time_ms, res);
+    LOG_TRACE("Hub: Request completed in %.2f ms (curl_result=%d)", ctx->last_request_time_ms, res);
 
     if (res != CURLE_OK) {
         if (error_msg) {
@@ -350,7 +356,7 @@ cJSON* Hub_InferenceJPEG(HubContext* ctx, const uint8_t* jpeg_data,
             snprintf(buf, sizeof(buf), "Request failed: %s", curl_easy_strerror(res));
             *error_msg = strdup(buf);
         }
-        syslog(LOG_ERR, "Hub: inference request failed: %s", curl_easy_strerror(res));
+        LOG_WARN("Hub: inference request failed: %s", curl_easy_strerror(res));
         free(resp.data);
         ctx->available = false;
         return NULL;
@@ -372,24 +378,47 @@ cJSON* Hub_InferenceJPEG(HubContext* ctx, const uint8_t* jpeg_data,
             snprintf(buf, sizeof(buf), "HTTP %ld", http_code);
             *error_msg = strdup(buf);
         }
-        syslog(LOG_ERR, "Hub: inference request returned HTTP %ld", http_code);
+        LOG_WARN("Hub: inference request returned HTTP %ld", http_code);
         free(resp.data);
         ctx->available = (http_code == 503);  /* Queue full - Hub is alive */
         return NULL;
     }
+
+    // Log the raw response for debugging
+    syslog(LOG_INFO, "Hub: Raw server response: %.500s%s",
+           resp.data ? resp.data : "(null)",
+           (resp.data && strlen(resp.data) > 500) ? "..." : "");
 
     cJSON* json = cJSON_Parse(resp.data);
     free(resp.data);
 
     if (!json) {
         if (error_msg) *error_msg = strdup("Failed to parse response");
-        syslog(LOG_ERR, "Hub: failed to parse inference response");
+        LOG_WARN("Hub: failed to parse inference response");
         ctx->available = false;
         return NULL;
     }
 
+    // Extract the detections array from the wrapper object
+    cJSON* detections = cJSON_GetObjectItem(json, "detections");
+    if (!detections || !cJSON_IsArray(detections)) {
+        if (error_msg) *error_msg = strdup("Response missing detections array");
+        LOG_WARN("Hub: response missing detections array");
+        cJSON_Delete(json);
+        ctx->available = false;
+        return NULL;
+    }
+
+    // Detach the array from the root object so we can delete the wrapper
+    cJSON* detections_array = cJSON_DetachItemFromObject(json, "detections");
+    cJSON_Delete(json);  // Delete the wrapper object
+
+    // Log parsed detection count
+    int detection_count = cJSON_GetArraySize(detections_array);
+    syslog(LOG_INFO, "Hub: Parsed %d detections from response", detection_count);
+
     ctx->available = true;
-    return json;
+    return detections_array;
 }
 
 double Hub_GetLastRequestTime(HubContext* ctx) {
@@ -435,5 +464,5 @@ void Hub_Cleanup(HubContext* ctx) {
     free(ctx->password);
     free(ctx);
 
-    syslog(LOG_INFO, "Hub: cleanup complete");
+    LOG_TRACE("Hub: cleanup complete");
 }
