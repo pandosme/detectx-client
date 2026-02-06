@@ -309,12 +309,17 @@ cJSON* Model_Inference(VdoBuffer* buffer) {
     if (!detections) {
         if (error_msg) {
             LOG_WARN("%s: Hub inference failed: %s\n", __func__, error_msg);
+            ACAP_STATUS_SetString("model", "error", error_msg);
             free(error_msg);
         } else {
             LOG_WARN("%s: Hub inference failed (no error message)\n", __func__);
+            ACAP_STATUS_SetString("model", "error", "Hub inference failed");
         }
         return cJSON_CreateArray();
     }
+
+    // Clear any previous error on successful inference
+    ACAP_STATUS_SetString("model", "error", "");
 
     LOG_TRACE("%s: Received response from Hub with %d detections\n", __func__, cJSON_GetArraySize(detections));
 

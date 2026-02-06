@@ -49,10 +49,7 @@ git clone https://github.com/pandosme/detectx-client
 cd detectx-client
 
 # Build for your camera architecture
-./build.sh --arch aarch64   # For ARTPEC-8/9
-# OR
-./build.sh --arch armv7hf   # For ARTPEC-7
-
+./build.sh 
 # Output: DetectX_Client_1_0_0_<arch>.eap
 ```
 
@@ -91,7 +88,7 @@ Open the camera web interface at `http://<camera-ip>` → **Apps** → **DetectX
 ```json
 {
   "hub": {
-    "url": "http://192.168.1.100:8080",
+    "url": "192.168.1.100",
     "username": "",           // Optional: HTTP digest auth
     "password": "",           // Optional: HTTP digest auth
     "captureRateMs": 1000,    // Capture interval (ms)

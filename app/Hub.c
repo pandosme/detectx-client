@@ -384,10 +384,6 @@ cJSON* Hub_InferenceJPEG(HubContext* ctx, const uint8_t* jpeg_data,
         return NULL;
     }
 
-    // Log the raw response for debugging
-    syslog(LOG_INFO, "Hub: Raw server response: %.500s%s",
-           resp.data ? resp.data : "(null)",
-           (resp.data && strlen(resp.data) > 500) ? "..." : "");
 
     cJSON* json = cJSON_Parse(resp.data);
     free(resp.data);
@@ -415,7 +411,6 @@ cJSON* Hub_InferenceJPEG(HubContext* ctx, const uint8_t* jpeg_data,
 
     // Log parsed detection count
     int detection_count = cJSON_GetArraySize(detections_array);
-    syslog(LOG_INFO, "Hub: Parsed %d detections from response", detection_count);
 
     ctx->available = true;
     return detections_array;

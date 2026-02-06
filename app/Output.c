@@ -74,6 +74,7 @@ static gboolean Output_DeactivateExpired(gpointer user_data) {
             // Use the last_detect_time set by Output() on detection
             if ((now - eventsCache[i].last_detect_time) > minEventDuration) {
                 eventsCache[i].state = 0;
+                LOG("Event LOW (timer): %s after %.0fms\n", eventsCache[i].name, (now - eventsCache[i].last_detect_time));
                 ACAP_EVENTS_Fire_State(eventsCache[i].name, 0);
                 snprintf(topic, sizeof(topic), "event/%s/%s/false", ACAP_DEVICE_Prop("serial"), eventsCache[i].name);
                 cJSON* statePayload = cJSON_CreateObject();
@@ -137,6 +138,7 @@ void Output(cJSON* detections) {
 
     // --- Adaptive event gating
     const char *prioritize = cJSON_GetObjectItem(settings, "prioritize")?cJSON_GetObjectItem(settings, "prioritize")->valuestring:"accuracy";
+    LOG_TRACE("Output: prioritize=%s, detections=%d\n", prioritize, cJSON_GetArraySize(detections));
 
     double averageInferenceTime = ACAP_STATUS_Double("mode", "averageTime");
     int   desired_window_ms = 1000;
@@ -144,6 +146,7 @@ void Output(cJSON* detections) {
     int   window_size = (int)((desired_window_ms + averageInferenceTime - 1) / averageInferenceTime);
     if (window_size < 2) window_size = 2;
     if (window_size > MAX_ROLLING) window_size = MAX_ROLLING;
+    LOG_TRACE("Output: window_size=%d, min_frames=%d\n", window_size, min_frames_in_window);
 
     cJSON* logic = cJSON_GetObjectItem(settings, "eventLogic");
     if (logic) {
@@ -192,6 +195,7 @@ void Output(cJSON* detections) {
             if (evt->state == 0) {
                 evt->state = 1;
                 evt->last_detect_time = now;
+                LOG("Event HIGH (speed): %s\n", label);
                 ACAP_EVENTS_Fire_State(label, 1);
                 snprintf(topic, sizeof(topic), "event/%s/%s/true", ACAP_DEVICE_Prop("serial"), label);
 
@@ -215,6 +219,7 @@ void Output(cJSON* detections) {
             if ((evt->state == 0) && (sum >= min_frames_in_window)) {
                 evt->state = 1;
                 evt->last_detect_time = now;
+                LOG("Event HIGH (accuracy): %s (sum=%d/%d)\n", label, sum, min_frames_in_window);
                 ACAP_EVENTS_Fire_State(label, 1);
                 snprintf(topic, sizeof(topic), "event/%s/%s/true", ACAP_DEVICE_Prop("serial"), label);
 
@@ -396,7 +401,9 @@ void Output(cJSON* detections) {
         detection = detection->next;
     }
 
-    // Mark 0 for non-detected labels for rolling buffer
+    // Mark 0 for non-detected labels for rolling buffer (accuracy mode only)
+    // This ensures events deactivate quickly when detections drop below threshold,
+    // while minEventDuration timer provides minimum hold time after last detection
     if (strcmp(prioritize, "accuracy") == 0) {
         for (int i = 0; i < eventsCache_len; ++i) {
             int seen = 0;
@@ -406,6 +413,28 @@ void Output(cJSON* detections) {
                 eventsCache[i].rolling_head = (eventsCache[i].rolling_head + 1) % window_size;
                 eventsCache[i].rolling[eventsCache[i].rolling_head] = 0;
                 if (eventsCache[i].rolling_count < window_size) eventsCache[i].rolling_count++;
+                
+                // Check if event should be deactivated immediately due to insufficient detections
+                if (eventsCache[i].state == 1) {
+                    int sum = 0;
+                    for (int k = 0; k < eventsCache[i].rolling_count; ++k)
+                        sum += eventsCache[i].rolling[k];
+                    
+                    // If detections drop below threshold, deactivate immediately (don't wait for timer)
+                    if (sum < min_frames_in_window) {
+                        eventsCache[i].state = 0;
+                        LOG("Event LOW (threshold): %s (sum=%d/%d)\n", eventsCache[i].name, sum, min_frames_in_window);
+                        ACAP_EVENTS_Fire_State(eventsCache[i].name, 0);
+                        snprintf(topic, sizeof(topic), "event/%s/%s/false", ACAP_DEVICE_Prop("serial"), eventsCache[i].name);
+                        cJSON* statePayload = cJSON_CreateObject();
+                        cJSON_AddStringToObject(statePayload, "label", eventsCache[i].name);
+                        cJSON_AddFalseToObject(statePayload, "state");
+                        cJSON_AddNumberToObject(statePayload, "timestamp", ACAP_DEVICE_Timestamp());
+                        MQTT_Publish_JSON(topic, statePayload, 0, 0);
+                        cJSON_Delete(statePayload);
+                        LOG_TRACE("%s: Label %s immediately deactivated (below threshold)\n", __func__, eventsCache[i].name);
+                    }
+                }
             }
         }
     }
@@ -425,7 +454,7 @@ void Output_reset(void) {
 
 // Initialization
 void Output_init(void) {
-    LOG_TRACE("<%s\n", __func__);
+    LOG("<%s\n", __func__);
     ACAP_HTTP_Node("crops", output_crop_cache_http_callback);
 
     cJSON* model = ACAP_Get_Config("model");
@@ -433,29 +462,41 @@ void Output_init(void) {
         LOG_WARN("%s: No Model Config found\n", __func__);
         return;
     }
-    cJSON* labels = cJSON_GetObjectItem(model, "labels");
-    if (!labels) {
-        LOG_WARN("%s: Model has no labels\n", __func__);
+    
+    // Model structure uses "classes" not "labels"
+    cJSON* classes = cJSON_GetObjectItem(model, "classes");
+    if (!classes) {
+        LOG_WARN("%s: Model has no classes\n", __func__);
         return;
     }
-    cJSON* label = labels->child;
-    while (label) {
-        if (cJSON_IsString(label)) {
+    
+    if (!cJSON_IsArray(classes)) {
+        LOG_WARN("%s: Model classes is not an array\n", __func__);
+        return;
+    }
+    
+    int num_classes = cJSON_GetArraySize(classes);
+    LOG("Registering %d event classes\n", num_classes);
+    
+    for (int i = 0; i < num_classes; i++) {
+        cJSON* class_item = cJSON_GetArrayItem(classes, i);
+        if (cJSON_IsString(class_item) && class_item->valuestring) {
             char niceName[32];
-            snprintf(niceName, sizeof(niceName), "DetectX: %s", label->valuestring);
-            char* labelCopy = strdup(label->valuestring);
+            snprintf(niceName, sizeof(niceName), "DetectX: %s", class_item->valuestring);
+            char* labelCopy = strdup(class_item->valuestring);
             if (labelCopy) {
                 replace_spaces(labelCopy);
+                LOG("Registering event: %s -> %s\n", labelCopy, niceName);
                 ACAP_EVENTS_Add_Event(labelCopy, niceName, 1);
                 free(labelCopy);
             }
         }
-        label = label->next;
     }
+    
     output_crop_cache_reset();
     g_timeout_add(200, Output_DeactivateExpired, NULL);
 
     // Optionally: Cleanup crop cache every 5 minutes
 //    g_timeout_add_seconds(300, output_crop_cache_cleanup, NULL);
-    LOG_TRACE("%s>\n", __func__);
+    LOG("%s>\n", __func__);
 }

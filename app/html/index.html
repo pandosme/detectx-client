@@ -446,6 +446,7 @@ function initializePage() {
 	$.ajax({type: "GET",url: 'app',dataType: 'json',cache: false,
 		success: function(data) {
 			App = data;
+			App.lastError = ''; // Initialize error tracking
 			// Update UI elements
 			document.title = App.manifest.acapPackageConf.setup.friendlyName;
 			$(".acapName").html(App.manifest.acapPackageConf.setup.friendlyName);
@@ -551,6 +552,14 @@ function initializePage() {
 				if ($('.modal:visible').length && $('body').hasClass('modal-open')) {
 					$('#errorModal').modal('hide');
 				};
+				
+				// Check for Hub errors and show toast
+				if (status.model.error && status.model.error !== '' && status.model.error !== App.lastError) {
+					showToast('<b>Hub Error:</b><br>' + status.model.error, 'danger');
+					App.lastError = status.model.error;
+				} else if (!status.model.error || status.model.error === '') {
+					App.lastError = '';
+				}
 				
 				$("#model_status").text("Status: " + status.model.status);
 
